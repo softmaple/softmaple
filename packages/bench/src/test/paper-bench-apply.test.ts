@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   applyRemoteEventsInBatches,
   applyRemoteEventsOneByOne,
+  summarizeApplyCallLatency,
+  timeApplyRemoteEvents,
 } from "../bench/paper-bench-apply";
 import {
   EgWalkerReplica,
@@ -74,6 +76,62 @@ describe("applyRemoteEventsOneByOne", () => {
     expect(() => applyRemoteEventsOneByOne(replica, [left!, root!])).toThrow(
       /event 0 \(left:0\) was buffered, not integrated/,
     );
+  });
+});
+
+describe("summarizeApplyCallLatency", () => {
+  it("should report nearest-rank percentiles and the slowest call", () => {
+    // Arrange
+    const callMs = Array.from({ length: 20 }, (_unused, index) => 20 - index);
+
+    // Act
+    const latency = summarizeApplyCallLatency(callMs);
+
+    // Assert
+    expect(latency).toEqual({ p50Ms: 10, p95Ms: 19, maxMs: 20 });
+  });
+
+  it("should report a single call as every percentile", () => {
+    // Arrange
+    const callMs = [7.5];
+
+    // Act
+    const latency = summarizeApplyCallLatency(callMs);
+
+    // Assert
+    expect(latency).toEqual({ p50Ms: 7.5, p95Ms: 7.5, maxMs: 7.5 });
+  });
+
+  it("should report nothing for a lane that timed no calls", () => {
+    // Arrange
+    const callMs: number[] = [];
+
+    // Act
+    const latency = summarizeApplyCallLatency(callMs);
+
+    // Assert
+    expect(latency).toBeNull();
+  });
+});
+
+describe("timeApplyRemoteEvents", () => {
+  it("should time each batch and keep its semantics", () => {
+    // Arrange
+    const events = branchAndMergeTrace();
+    const replica = new EgWalkerReplica("paper-batch-timed");
+    const callMs: number[] = [];
+
+    // Act
+    const applyCalls = applyRemoteEventsInBatches(
+      timeApplyRemoteEvents(replica, callMs),
+      events,
+      2,
+    );
+
+    // Assert
+    expect(callMs).toHaveLength(applyCalls);
+    expect(callMs.every((ms) => ms >= 0)).toBe(true);
+    expect(replica.getText()).toBe(referenceState(events).text);
   });
 });
 

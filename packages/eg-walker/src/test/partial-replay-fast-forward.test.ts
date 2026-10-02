@@ -87,6 +87,64 @@ describe("EgWalkerReplica partial replay from a checkpoint", () => {
       incrementalApplies: 1,
     });
   });
+
+  it("should replay a second divergence from the first one's base", () => {
+    // Arrange
+    const history = historyWithConcurrentSections();
+    const replica = new EgWalkerReplica("reader", "", pack(history));
+    const first = insert("peer:0", ["after:194"], 0, "!");
+    // A merge closes the divergence and a typed chain drops its cache.
+    const merge = insert("merge:peer", ["peer:0", "after:494"], 1_016, "M");
+    const chain = typing("tail", 8, ["merge:peer"], 1_017);
+    replica.applyRemoteEvent(first);
+    replica.applyRemoteEvent(merge);
+    replica.applyRemoteEvents(chain);
+    // Concurrent with `first` too, so the newest critical cut before it is
+    // the first divergence's base, newer than every older checkpoint.
+    const second = insert("late:0", ["after:200"], 0, "?");
+
+    // Act
+    replica.applyRemoteEvent(second);
+
+    // Assert
+    expect(replica.getText()).toBe(
+      replayedText([...history, first, merge, ...chain, second]),
+    );
+    expect(replica.getReplayStats().partialReplays).toBe(2);
+  });
+
+  it("should retreat and advance deletes of the checkpoint's text", () => {
+    // Arrange
+    const history = typing("author", 600, [], 0);
+    const replica = new EgWalkerReplica("reader", "", pack(history));
+    // One peer deletes loaded characters one at a time, as a deleted line
+    // arrives; another deletes ten of the same characters in one edit. The
+    // replay that follows is long enough to keep the loaded text as one
+    // segmented placeholder.
+    const left = forwardDeletes("left", 80, "author:599", 100);
+    replica.applyRemoteEvents(left);
+    const concurrent = [
+      remove("right:0", ["author:599"], 110, 10),
+      insert("right:1", ["right:0"], 110, "R"),
+      remove("left:80", ["left:79"], 100, 1),
+      insert("right:2", ["right:1"], 111, "S"),
+      insert("merge:0", ["left:80", "right:2"], 0, "M"),
+      // Retreats both peers' deletes at once, then types after the region
+      // they deleted, where a miscounted character would shift the edit.
+      insert("far:0", ["author:599"], 0, "F"),
+      insert("far:1", ["far:0"], 200, "G"),
+    ];
+
+    // Act
+    for (const event of concurrent) {
+      replica.applyRemoteEvent(event);
+    }
+
+    // Assert
+    expect(replica.getText()).toBe(
+      replayedText([...history, ...left, ...concurrent]),
+    );
+  });
 });
 
 // Helpers
@@ -102,6 +160,34 @@ const insert = (
   parentVersion: new Set(parents),
   timestamp: 0,
 });
+
+const remove = (
+  id: EventId,
+  parents: ReadonlyArray<EventId>,
+  index: number,
+  length: number,
+): GraphEvent => ({
+  id,
+  operation: { type: OPERATION_TYPE.DELETE, index, length },
+  parentVersion: new Set(parents),
+  timestamp: 0,
+});
+
+/** `count` single-character deletes at `index`, each after the last. */
+const forwardDeletes = (
+  replicaId: string,
+  count: number,
+  parent: EventId,
+  index: number,
+): GraphEvent[] =>
+  Array.from({ length: count }, (_unused, offset) =>
+    remove(
+      `${replicaId}:${offset}`,
+      [offset === 0 ? parent : `${replicaId}:${offset - 1}`],
+      index,
+      1,
+    ),
+  );
 
 /** One author typing `count` characters from `startIndex` onwards. */
 const typing = (

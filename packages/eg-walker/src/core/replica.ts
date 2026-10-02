@@ -71,6 +71,7 @@ import type {
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
 import {
   planPackedCriticalReplaySectionsSteps,
+  planPackedSuffixCriticalReplaySections,
   type PackedCriticalReplayPlan,
 } from "../engine/packed-critical-replay-plan";
 import { PartialReplayManager } from "../engine/partial-replay";
@@ -178,8 +179,9 @@ export interface PrepareReplicaOptions {
 /** Default {@link PrepareReplicaOptions.sliceMs}. */
 const DEFAULT_PREPARE_SLICE_MS = 8;
 
-// Release large caches at a critical cut, but keep an active concurrent
-// interval warm until its estimated byte budget is exhausted.
+// Release large caches at a critical cut, unless a release had to be rebuilt
+// (see `retainReplayCacheAcrossCuts`), but keep an active concurrent interval
+// warm until its estimated byte budget is exhausted.
 const REPLAY_CACHE_CRITICAL_RELEASE_EVENTS = 4_096;
 const MAX_WARM_BATCH_EVENTS = 4_096;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
@@ -322,18 +324,16 @@ interface RemoteBatchSnapshot {
   readonly restoredSequenceRecords: ReadonlyArray<EngineSequenceRecord> | null;
   readonly restoredDeleteTargets: ReadonlyArray<DeleteTargetRecord> | null;
   readonly replayCacheBaseVersion: Version | null;
-  readonly replayCacheCoveredEventIds: Set<EventId> | null;
+  readonly replayCacheBaseEventCount: number;
+  readonly replayCacheBaseLocalVersions: ReadonlyArray<number>;
   readonly replayCacheCoverageChecks: number;
   readonly replayCacheEvents: number;
   readonly replayCacheBytes: number;
   readonly replayCacheBudgetBytes: number;
   readonly releasedCacheAtBudget: boolean;
+  readonly replayCacheCriticalReleaseCut: number;
+  readonly retainReplayCacheAcrossCuts: boolean;
   readonly engineRecoveryAnchor: EngineRecoveryAnchor | null;
-}
-
-interface ReplayCacheCoverageAddition {
-  readonly coveredEventIds: Set<EventId>;
-  readonly eventId: EventId;
 }
 
 interface StateEngineRecoveryAnchor {
@@ -352,6 +352,17 @@ interface CheckpointEngineRecoveryAnchor {
 type EngineRecoveryAnchor =
   | StateEngineRecoveryAnchor
   | CheckpointEngineRecoveryAnchor;
+
+/** What a partial replay leaves for the replica to adopt. */
+interface SuffixReplay {
+  /** Engine over the last nonlinear section after the checkpoint, onwards. */
+  readonly engine: EgWalkerEngine;
+  /** Where that engine starts: the newest critical cut before it. */
+  readonly base: CriticalCheckpoint;
+  readonly textBuffer: PersistentUtf16Rope;
+  /** Peak records of the throwaway engines before {@link base}. */
+  readonly peakSequenceRecordCount: number;
+}
 
 /**
  * Events of one exact chain at offsets `0..count`: a {@link LinearEventBatch},
@@ -386,15 +397,20 @@ export class EgWalkerReplica {
   private engineStatsOverride: EngineStats | null = null;
   private replayCacheBaseVersion: Version | null = null;
   /**
-   * Events known to dominate the complete replay-cache base. Critical
-   * checkpoints have singleton frontiers, so every accepted descendant can
-   * be tracked with a direct parent lookup. Multi-frontier native resumes use
-   * the general closure check once, then track descendants the same way.
+   * Events before the replay-cache base's cut, which is the base version's
+   * closure. While the cache lives, every event at or after this insertion
+   * rank descends from the base: an event that does not is never applied to
+   * the cache, it replaces the cache with a replay. Coverage is then a check
+   * of an event's direct parents, whatever the history's length.
    */
-  private replayCacheCoveredEventIds: Set<EventId> | null = null;
+  private replayCacheBaseEventCount = 0;
+  /** Local versions of {@link replayCacheBaseVersion}'s events. */
+  private replayCacheBaseLocalVersions: ReadonlyArray<number> = [];
+  private readonly coverageParents: number[] = [];
+  private readonly pushCoverageParent = (parent: number): void => {
+    this.coverageParents.push(parent);
+  };
   private replayCacheCoverageChecks = 0;
-  private replayCacheCoverageJournal: ReplayCacheCoverageAddition[] | null =
-    null;
   private snapshotValidationStats = { replays: 0, events: 0, linearReplays: 0 };
   private replayCacheEvents = 0;
   private replayCacheBytes = 0;
@@ -402,6 +418,25 @@ export class EgWalkerReplica {
   private replayCacheBudgetBytes = MAX_REPLAY_CACHE_BYTES;
   /** True while a byte-budget refusal has not yet been paid for by a replay. */
   private releasedCacheAtBudget = false;
+  /** Event count at the last release of a replay cache at a critical cut. */
+  private replayCacheCriticalReleaseCut = -1;
+  /**
+   * Keep the replay cache across critical cuts while batches arrive.
+   *
+   * A cache of more than {@link REPLAY_CACHE_CRITICAL_RELEASE_EVENTS} events
+   * is released at the next critical cut, a bet that later events do not
+   * reach back past it. A long-lived branch that is merged and then extended
+   * again loses that bet: its next event is concurrent with everything since
+   * the branch's last cut, and the partial replay that follows rebuilds the
+   * events the release dropped, as often as the branch is extended. When a
+   * partial replay for a batch rebuilt more than
+   * REPLAY_CACHE_CRITICAL_RELEASE_EVENTS events from before the last release,
+   * the cache it builds is kept until it is released for its size or dropped
+   * by a linear batch. Single events still release it at a critical cut: a
+   * kept engine would integrate every event after the cut, where a release
+   * lets the linear ones edit the text directly.
+   */
+  private retainReplayCacheAcrossCuts = false;
   private engineRecoveryAnchor: EngineRecoveryAnchor | null = null;
   private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
@@ -469,7 +504,10 @@ export class EgWalkerReplica {
       // its captured frontier. A divergent suffix falls back to a retained
       // checkpoint instead of treating restored runtime indexes as a cold
       // full-graph cache.
-      this.setReplayCacheBase(this.currentVersion);
+      this.setReplayCacheBase(
+        this.currentVersion,
+        this.ensureEventGraph().getEventCount(),
+      );
       this.replayCacheEvents = 0;
       this.captureEngineRecoveryAnchor(this.engine, this.ensureEventGraph());
       this.refreshReplayCacheMetrics();
@@ -966,7 +1004,6 @@ export class EgWalkerReplica {
     );
     const snapshot = this.captureRemoteBatchSnapshot();
     const transaction = graph.beginAppendTransaction();
-    this.replayCacheCoverageJournal = [];
     try {
       graph.addEvent(cloned);
       const effect = this.advanceWithEvent(cloned, extendsCurrentVersion);
@@ -977,11 +1014,8 @@ export class EgWalkerReplica {
       };
     } catch (error) {
       transaction.rollback();
-      this.rollbackReplayCacheCoverage();
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
-    } finally {
-      this.replayCacheCoverageJournal = null;
     }
   }
 
@@ -1013,7 +1047,6 @@ export class EgWalkerReplica {
 
     const snapshot = this.captureRemoteBatchSnapshot();
     const transaction = graph.beginAppendTransaction();
-    this.replayCacheCoverageJournal = [];
     const eventCountBeforeBatch = graph.getEventCount();
 
     try {
@@ -1050,7 +1083,7 @@ export class EgWalkerReplica {
           if (checkpoint === null) {
             this.fullReplay();
           } else {
-            this.partialReplayFromCheckpoint(checkpoint);
+            this.partialReplayFromCheckpoint(checkpoint, true);
             this.maybeAdvanceCheckpoint();
           }
         }
@@ -1063,11 +1096,8 @@ export class EgWalkerReplica {
       transaction.commit();
     } catch (error) {
       transaction.rollback();
-      this.rollbackReplayCacheCoverage();
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
-    } finally {
-      this.replayCacheCoverageJournal = null;
     }
   }
 
@@ -1128,8 +1158,6 @@ export class EgWalkerReplica {
     const snapshot = this.captureRemoteBatchSnapshot();
     const remoteTransaction = remoteEvents.beginTransaction();
     const transaction = graph.beginAppendTransaction();
-    const coverageJournal: ReplayCacheCoverageAddition[] = [];
-    this.replayCacheCoverageJournal = coverageJournal;
     const operations: PositionOperation[] = [];
     let operationsAreExact = true;
 
@@ -1158,7 +1186,6 @@ export class EgWalkerReplica {
 
       transaction.commit();
       remoteTransaction.commit();
-      this.replayCacheCoverageJournal = null;
       return {
         results: prepared.results,
         operations: operationsAreExact ? operations : null,
@@ -1166,11 +1193,6 @@ export class EgWalkerReplica {
     } catch (error) {
       transaction.rollback();
       remoteTransaction.rollback();
-      for (let index = coverageJournal.length - 1; index >= 0; index--) {
-        const addition = coverageJournal[index]!;
-        addition.coveredEventIds.delete(addition.eventId);
-      }
-      this.replayCacheCoverageJournal = null;
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
     }
@@ -1190,7 +1212,6 @@ export class EgWalkerReplica {
   ): ApplyRemoteEventsResult {
     const snapshot = this.captureRemoteBatchSnapshot();
     const transaction = graph.beginAppendTransaction();
-    this.replayCacheCoverageJournal = [];
 
     try {
       if (
@@ -1216,7 +1237,7 @@ export class EgWalkerReplica {
         if (checkpoint === null) {
           this.fullReplay();
         } else {
-          this.partialReplayFromCheckpoint(checkpoint);
+          this.partialReplayFromCheckpoint(checkpoint, true);
           this.maybeAdvanceCheckpoint();
         }
       }
@@ -1225,11 +1246,8 @@ export class EgWalkerReplica {
       return { results: prepared.results, operations: null };
     } catch (error) {
       transaction.rollback();
-      this.rollbackReplayCacheCoverage();
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
-    } finally {
-      this.replayCacheCoverageJournal = null;
     }
   }
 
@@ -1248,11 +1266,19 @@ export class EgWalkerReplica {
     if (this.engine === null || events.length > MAX_WARM_BATCH_EVENTS)
       return false;
     this.engineStatsOverride = null;
-    for (const event of events) {
-      if (!this.replayCacheCovers(event.parentVersion)) return false;
-      this.markReplayCacheCovered(event.id);
+    // The caller appended the batch last, so it holds the newest local
+    // versions, in order.
+    const firstLocalVersion = graph.getEventCount() - events.length;
+    for (let offset = 0; offset < events.length; offset++) {
+      if (!this.replayCacheCoversEventAt(graph, firstLocalVersion + offset)) {
+        return false;
+      }
     }
-    this.documentBuffer = this.engine.applyEventBatch(events, graph);
+    this.documentBuffer = this.engine.applyEventBatch(
+      events,
+      graph,
+      firstLocalVersion,
+    );
     this.documentCache = null;
     this.replayCacheEvents += events.length;
     this.refreshReplayCacheMetrics();
@@ -1262,15 +1288,10 @@ export class EgWalkerReplica {
     this.incrementalApplyCount += events.length;
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
     this.clearSupersededReplayCacheRefusal();
-    this.evictReplayCacheIfNeeded();
+    this.growReplayCacheBudgetToKeepRebuild(false);
+    this.evictReplayCacheIfNeeded(this.retainReplayCacheAcrossCuts);
     this.maybeAdvanceCheckpoint();
     return true;
-  }
-
-  private rollbackReplayCacheCoverage(): void {
-    for (const addition of this.replayCacheCoverageJournal ?? []) {
-      addition.coveredEventIds.delete(addition.eventId);
-    }
   }
 
   private applyClosedLinearBatch(
@@ -1364,17 +1385,13 @@ export class EgWalkerReplica {
       throw error;
     }
 
-    this.replayCacheCoverageJournal = [];
     try {
       this.applyLinearBatch(batch, eventCountBeforeBatch);
       transaction.commit();
     } catch {
       transaction.rollback();
-      this.rollbackReplayCacheCoverage();
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       return null;
-    } finally {
-      this.replayCacheCoverageJournal = null;
     }
     return linearBatchResults(batch);
   }
@@ -1695,11 +1712,15 @@ export class EgWalkerReplica {
       validator.replicaPeakSequenceRecordCount,
     );
     this.replayCacheBaseVersion = validator.replayCacheBaseVersion;
-    this.replayCacheCoveredEventIds = validator.replayCacheCoveredEventIds;
+    this.replayCacheBaseEventCount = validator.replayCacheBaseEventCount;
+    this.replayCacheBaseLocalVersions = validator.replayCacheBaseLocalVersions;
     this.replayCacheEvents = validator.replayCacheEvents;
     this.replayCacheBytes = validator.replayCacheBytes;
     this.replayCacheBudgetBytes = validator.replayCacheBudgetBytes;
     this.releasedCacheAtBudget = validator.releasedCacheAtBudget;
+    this.replayCacheCriticalReleaseCut =
+      validator.replayCacheCriticalReleaseCut;
+    this.retainReplayCacheAcrossCuts = validator.retainReplayCacheAcrossCuts;
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
     const counters = this.criticalCheckpoints.snapshotForTransaction();
@@ -1767,15 +1788,15 @@ export class EgWalkerReplica {
       restoredSequenceRecords: this.restoredSequenceRecords,
       restoredDeleteTargets: this.restoredDeleteTargets,
       replayCacheBaseVersion: this.replayCacheBaseVersion,
-      // Keep the set by reference. New IDs are journaled for the duration of
-      // the batch and removed on rollback, avoiding an O(history) clone for
-      // every single-event applyRemoteEvent call.
-      replayCacheCoveredEventIds: this.replayCacheCoveredEventIds,
+      replayCacheBaseEventCount: this.replayCacheBaseEventCount,
+      replayCacheBaseLocalVersions: this.replayCacheBaseLocalVersions,
       replayCacheCoverageChecks: this.replayCacheCoverageChecks,
       replayCacheEvents: this.replayCacheEvents,
       replayCacheBytes: this.replayCacheBytes,
       replayCacheBudgetBytes: this.replayCacheBudgetBytes,
       releasedCacheAtBudget: this.releasedCacheAtBudget,
+      replayCacheCriticalReleaseCut: this.replayCacheCriticalReleaseCut,
+      retainReplayCacheAcrossCuts: this.retainReplayCacheAcrossCuts,
       engineRecoveryAnchor: this.engineRecoveryAnchor,
     };
   }
@@ -1801,7 +1822,8 @@ export class EgWalkerReplica {
       snapshot.replayCacheBaseVersion === null
         ? null
         : new Set(snapshot.replayCacheBaseVersion);
-    this.replayCacheCoveredEventIds = snapshot.replayCacheCoveredEventIds;
+    this.replayCacheBaseEventCount = snapshot.replayCacheBaseEventCount;
+    this.replayCacheBaseLocalVersions = snapshot.replayCacheBaseLocalVersions;
     this.replayCacheCoverageChecks = snapshot.replayCacheCoverageChecks;
     this.replayCacheEvents = snapshot.replayCacheEvents;
     this.replayCacheBytes = snapshot.replayCacheBytes;
@@ -1810,6 +1832,8 @@ export class EgWalkerReplica {
     // attempt.
     this.replayCacheBudgetBytes = snapshot.replayCacheBudgetBytes;
     this.releasedCacheAtBudget = snapshot.releasedCacheAtBudget;
+    this.replayCacheCriticalReleaseCut = snapshot.replayCacheCriticalReleaseCut;
+    this.retainReplayCacheAcrossCuts = snapshot.retainReplayCacheAcrossCuts;
     this.engineRecoveryAnchor = snapshot.engineRecoveryAnchor;
 
     if (snapshot.engineStats === null) {
@@ -2046,7 +2070,6 @@ export class EgWalkerReplica {
     let aggregateStats: EngineStats | null = null;
     let retainedEngine: EgWalkerEngine | null = null;
     let retainedBaseCheckpoint: CriticalCheckpoint | null = null;
-    let retainedEventIds: ReadonlyArray<EventId> = [];
     let maxLinearBridgeEvents = MIN_LINEAR_BRIDGE_EVENTS;
 
     this.documentBuffer = PersistentUtf16Rope.from(this.initialText);
@@ -2180,10 +2203,6 @@ export class EgWalkerReplica {
           engine.preparePackedRetention(plan, sectionIndex, sectionEnd);
           retainedEngine = engine;
           retainedBaseCheckpoint = baseCheckpoint;
-          retainedEventIds = plan.eventIdsInSectionRange(
-            sectionIndex,
-            sectionEnd,
-          );
         }
       }
 
@@ -2224,8 +2243,12 @@ export class EgWalkerReplica {
         checkpoint: retainedBaseCheckpoint,
         estimatedBytes: 0,
       };
-      this.setReplayCacheBase(retainedBaseCheckpoint.version, retainedEventIds);
-      this.replayCacheEvents = retainedEventIds.length;
+      this.setReplayCacheBase(
+        retainedBaseCheckpoint.version,
+        retainedBaseCheckpoint.eventCount,
+      );
+      this.replayCacheEvents =
+        plan.eventCount - retainedBaseCheckpoint.eventCount;
     } else {
       this.engineRecoveryAnchor = null;
       this.setReplayCacheBase(null);
@@ -2708,9 +2731,11 @@ export class EgWalkerReplica {
     // A retained replay engine can retreat as well as advance. Reuse it for a
     // concurrent burst while its seed checkpoint remains an ancestor of the
     // incoming prepare version.
-    if (this.engine && this.replayCacheCovers(event.parentVersion)) {
+    if (
+      this.engine &&
+      this.replayCacheCoversEventAt(graph, graph.localVersionOf(event.id))
+    ) {
       const applied = this.engine.applyEvent(event, graph);
-      this.markReplayCacheCovered(event.id);
       this.documentBuffer = applied.textBuffer;
       this.documentCache = null;
       this.currentVersion = graph.getFrontierView();
@@ -2719,6 +2744,7 @@ export class EgWalkerReplica {
       this.replayCacheEvents++;
       this.clearSupersededReplayCacheRefusal();
       this.refreshReplayCacheMetrics();
+      this.growReplayCacheBudgetToKeepRebuild(false);
       this.evictReplayCacheIfNeeded();
       this.maybeAdvanceCheckpoint();
       return toRemoteIntegrationEffect(applied.transformedOperations);
@@ -2734,7 +2760,20 @@ export class EgWalkerReplica {
     return { operation: null, exact: false };
   }
 
-  private replayCacheCovers(parentVersion: Version): boolean {
+  /**
+   * Whether the event at `localVersion` descends from the replay-cache base,
+   * so the cache can integrate it.
+   *
+   * Every event at or after the base's cut descends from the base (see
+   * {@link replayCacheBaseEventCount}), so one such parent is enough. An
+   * event whose parents all precede the cut descends from a base event only
+   * by naming it: the base's events are the heads of the events before the
+   * cut, and no other of those events descends from one of them.
+   */
+  private replayCacheCoversEventAt(
+    graph: EventGraph,
+    localVersion: number,
+  ): boolean {
     const base = this.replayCacheBaseVersion;
     if (base === null) {
       return false;
@@ -2742,62 +2781,49 @@ export class EgWalkerReplica {
     if (base.size === 0) {
       return true;
     }
-
-    if (versionsEqual(base, parentVersion)) {
-      return true;
-    }
-
-    const coveredEventIds = this.replayCacheCoveredEventIds;
-    if (coveredEventIds !== null) {
-      for (const parentId of parentVersion) {
-        this.replayCacheCoverageChecks++;
-        if (coveredEventIds.has(parentId)) {
-          return true;
-        }
+    const parents = this.coverageParents;
+    parents.length = 0;
+    graph.forEachParentLocalVersion(localVersion, this.pushCoverageParent);
+    const cut = this.replayCacheBaseEventCount;
+    for (let index = 0; index < parents.length; index++) {
+      this.replayCacheCoverageChecks++;
+      if (parents[index]! >= cut) {
+        return true;
       }
     }
-    if (base.size === 1) {
+    const heads = this.replayCacheBaseLocalVersions;
+    if (parents.length < heads.length) {
       return false;
     }
-
-    // Native resume state can be based at a multi-element frontier. Preserve
-    // the general closure check for that uncommon extension path; critical
-    // checkpoint caches always use the direct-parent index above.
-    const expandedParent = this.ensureEventGraph().expandVersion(parentVersion);
-    this.replayCacheCoverageChecks += expandedParent.size;
-    for (const eventId of base) {
-      if (!expandedParent.has(eventId)) {
+    for (const head of heads) {
+      this.replayCacheCoverageChecks++;
+      if (!parents.includes(head)) {
         return false;
       }
     }
     return true;
   }
 
-  private markReplayCacheCovered(eventId: EventId): void {
-    const coveredEventIds = this.replayCacheCoveredEventIds;
-    if (coveredEventIds === null || coveredEventIds.has(eventId)) {
-      return;
-    }
-    coveredEventIds.add(eventId);
-    this.replayCacheCoverageJournal?.push({ coveredEventIds, eventId });
-  }
-
+  /**
+   * Base the replay cache at `baseVersion`, whose closure is the first
+   * `baseEventCount` events, or drop it with `null`.
+   */
   private setReplayCacheBase(
     baseVersion: Version | null,
-    coveredEventIds: Iterable<EventId> = [],
+    baseEventCount = 0,
   ): void {
+    this.retainReplayCacheAcrossCuts = false;
     this.replayCacheBaseVersion =
       baseVersion === null ? null : new Set(baseVersion);
+    this.replayCacheBaseEventCount = baseEventCount;
     if (baseVersion === null || baseVersion.size === 0) {
-      this.replayCacheCoveredEventIds = null;
+      this.replayCacheBaseLocalVersions = [];
       return;
     }
-    this.replayCacheCoveredEventIds = new Set(coveredEventIds);
-    if (baseVersion.size === 1) {
-      for (const eventId of baseVersion) {
-        this.replayCacheCoveredEventIds.add(eventId);
-      }
-    }
+    const graph = this.ensureEventGraph();
+    this.replayCacheBaseLocalVersions = Array.from(baseVersion, (eventId) =>
+      graph.localVersionOf(eventId),
+    );
   }
 
   private maybeAdvanceCheckpoint(): void {
@@ -2861,19 +2887,21 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Widen the budget so the cache a partial replay just built is kept, when
-   * releasing it would only make the next event rebuild it.
+   * Widen the budget so an over-budget cache is kept, when releasing it would
+   * only make the next event rebuild it.
    *
-   * The replay started its engine at the newest critical version before the
+   * The cache's engine starts at the newest critical version before the
    * divergence. While the frontier still has more than one head, the
    * divergence is open and the next event on the concurrent branch needs the
-   * same interval. Releasing an over-budget cache then saves memory only
-   * until that event and pays the whole replay again. That is the thrash a
-   * full replay after a refusal detects, and it is treated the same way when
-   * this replay rebuilt a refused cache. A rebuild of more than
-   * {@link REPLAY_CACHE_CRITICAL_RELEASE_EVENTS} events is that costly from
-   * its first refusal, so it does not wait to be paid twice. A smaller cache
-   * is cheap to rebuild and is still released the first time.
+   * same interval: no checkpoint after the cache's start can serve it.
+   * Releasing an over-budget cache then saves memory only until that event
+   * and pays the whole replay again, a full replay when no checkpoint is
+   * left. That is the thrash a full replay after a refusal detects, and it is
+   * treated the same way when a partial replay rebuilt a refused cache. A
+   * cache of more than {@link REPLAY_CACHE_CRITICAL_RELEASE_EVENTS} events
+   * is that costly from its first refusal, whether a replay just built it or
+   * incremental applies grew it, so it does not wait to be paid twice. A
+   * smaller cache is cheap to rebuild and is still released the first time.
    *
    * The budget grows in one step to fit the estimate, bounded by
    * {@link MAX_REPLAY_CACHE_BUDGET_BYTES}; a cache above the ceiling is still
@@ -2927,17 +2955,28 @@ export class EgWalkerReplica {
       (this.engineRecoveryAnchor?.estimatedBytes ?? 0);
   }
 
-  private evictReplayCacheIfNeeded(): void {
+  /**
+   * Release the replay cache when it is over its budget, or when it is large
+   * and the frontier is a critical cut, unless `retainAcrossCuts`; see
+   * {@link retainReplayCacheAcrossCuts}.
+   */
+  private evictReplayCacheIfNeeded(retainAcrossCuts = false): void {
     const overBudget = this.replayCacheBytes > this.replayCacheBudgetBytes;
     if (
       !overBudget &&
       (this.replayCacheEvents <= REPLAY_CACHE_CRITICAL_RELEASE_EVENTS ||
-        this.currentVersion.size > 1)
+        this.currentVersion.size > 1 ||
+        retainAcrossCuts)
     ) {
       return;
     }
-    if (overBudget && this.engine !== null) {
-      this.releasedCacheAtBudget = true;
+    if (this.engine !== null) {
+      if (overBudget) {
+        this.releasedCacheAtBudget = true;
+      } else {
+        this.replayCacheCriticalReleaseCut =
+          this.ensureEventGraph().getEventCount();
+      }
     }
     this.captureEnginePeakBeforeSwap();
     this.engine = null;
@@ -2957,9 +2996,14 @@ export class EgWalkerReplica {
    * straight onto the rope and nonlinear sections in throwaway engines, so the
    * retained engine starts at the nearest critical version before the
    * divergence rather than at the checkpoint, which the checkpoint ladder may
-   * have placed up to twice as far back.
+   * have placed up to twice as far back. A replay for a batch receive may
+   * keep its engine across critical cuts; see
+   * {@link retainReplayCacheAcrossCuts}.
    */
-  private partialReplayFromCheckpoint(checkpoint: CriticalCheckpoint): void {
+  private partialReplayFromCheckpoint(
+    checkpoint: CriticalCheckpoint,
+    receivesBatch = false,
+  ): void {
     const graph = this.ensureEventGraph();
     // A refusal still pending means this replay rebuilds a cache that was
     // refused at the budget. Settle it here: the end of this replay either
@@ -2968,6 +3012,157 @@ export class EgWalkerReplica {
     this.releasedCacheAtBudget = false;
     this.captureEnginePeakBeforeSwap();
     const frontier = graph.getFrontierView();
+    const plan =
+      checkpoint.eventCount > 0 && checkpoint.eventCount < graph.getEventCount()
+        ? planPackedSuffixCriticalReplaySections(graph, checkpoint.eventCount)
+        : null;
+    const replay =
+      plan === null
+        ? this.replaySuffixAsObjects(graph, checkpoint)
+        : this.replayPackedSuffix(graph, checkpoint, plan);
+    // The next event on the same divergence replays from the same base.
+    if (replay.base.eventCount > checkpoint.eventCount) {
+      this.criticalCheckpoints.recordReplayBase(
+        replay.base.version,
+        replay.base.textBuffer,
+        replay.base.eventCount,
+        graph.getEventCount(),
+      );
+    }
+    this.engine = replay.engine;
+    this.engineRecoveryAnchor = {
+      kind: "checkpoint",
+      checkpoint: replay.base,
+      estimatedBytes: 0,
+    };
+    this.setReplayCacheBase(replay.base.version, replay.base.eventCount);
+    // Whether the last release at a critical cut dropped events this replay
+    // had to rebuild.
+    this.retainReplayCacheAcrossCuts =
+      receivesBatch &&
+      this.replayCacheCriticalReleaseCut - replay.base.eventCount >
+        REPLAY_CACHE_CRITICAL_RELEASE_EVENTS;
+    this.replayCacheEvents = graph.getEventCount() - replay.base.eventCount;
+    this.replicaPeakSequenceRecordCount = Math.max(
+      this.replicaPeakSequenceRecordCount,
+      replay.peakSequenceRecordCount,
+    );
+    this.documentBuffer = replay.textBuffer;
+    this.documentCache = null;
+    this.currentVersion = frontier;
+    this.restoredSequenceRecords = null;
+    this.restoredDeleteTargets = null;
+    this.partialReplayCount++;
+    this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
+    this.refreshReplayCacheMetrics();
+    this.growReplayCacheBudgetToKeepRebuild(rebuildsRefusedCache);
+    this.evictReplayCacheIfNeeded(this.retainReplayCacheAcrossCuts);
+  }
+
+  /**
+   * Replay the events after `checkpoint` over a packed view of them alone,
+   * with the planner and section replay a cold replay uses. No event is
+   * materialized as an object, and the work follows the suffix.
+   *
+   * The plan's first section is the checkpoint, which is not replayed.
+   */
+  private replayPackedSuffix(
+    graph: EventGraph,
+    checkpoint: CriticalCheckpoint,
+    plan: PackedCriticalReplayPlan,
+  ): SuffixReplay {
+    // Consecutive chains are linear sections, so a suffix without
+    // concurrency keeps the whole chain in the engine, as a single replay
+    // would.
+    let engineSection = plan.sectionCount - 1;
+    while (engineSection > 1 && plan.isLinearSection(engineSection)) {
+      engineSection--;
+    }
+
+    let document = checkpoint.textBuffer;
+    let version: Version = checkpoint.version;
+    let peakSequenceRecordCount = 0;
+    for (let sectionIndex = 1; sectionIndex < engineSection; ) {
+      if (plan.isLinearSection(sectionIndex)) {
+        let sectionEnd = sectionIndex + 1;
+        while (sectionEnd < engineSection && plan.isLinearSection(sectionEnd)) {
+          sectionEnd++;
+        }
+        const end = plan.sectionEndAt(sectionEnd - 1);
+        document = this.replayChain(
+          (orderIndex) => plan.operationAt(orderIndex),
+          plan.sectionStartAt(sectionIndex),
+          end,
+          document,
+        );
+        version = new Set([plan.eventIdAt(end - 1)]);
+        sectionIndex = sectionEnd;
+        continue;
+      }
+      // One engine lifetime covers nonlinear sections separated only by
+      // short chains, as in a cold replay, so a history of many small
+      // concurrent sections does not rebuild the document once per section.
+      const grouped = extendPackedNonlinearReplayRange(
+        plan,
+        sectionIndex,
+        engineSection,
+        MAX_LINEAR_BRIDGE_EVENTS,
+      );
+      const endVersion = plan.advanceFrontierRange(
+        version,
+        sectionIndex,
+        grouped.endSection,
+      );
+      const generated = new EgWalkerEngine().generatePackedSectionRange(
+        plan,
+        sectionIndex,
+        grouped.endSection,
+        graph,
+        version,
+        document,
+      );
+      document = generated.textBuffer;
+      peakSequenceRecordCount = Math.max(
+        peakSequenceRecordCount,
+        generated.stats.peakSequenceRecordCount,
+      );
+      version = endVersion;
+      sectionIndex = grouped.endSection;
+    }
+
+    const base: CriticalCheckpoint = {
+      version: new Set(version),
+      textBuffer: document,
+      // The plan's first event is the checkpoint's last one.
+      eventCount:
+        checkpoint.eventCount + plan.sectionStartAt(engineSection) - 1,
+    };
+    const engine = new EgWalkerEngine();
+    const generated = engine.generatePackedSectionRange(
+      plan,
+      engineSection,
+      plan.sectionCount,
+      graph,
+      version,
+      document,
+    );
+    engine.preparePackedRetention(plan, engineSection, plan.sectionCount);
+    return {
+      engine,
+      base,
+      textBuffer: generated.textBuffer,
+      peakSequenceRecordCount,
+    };
+  }
+
+  /**
+   * Replay the events after `checkpoint` as objects, for a graph whose
+   * suffix has no packed view (see {@link EventGraph.getPackedSuffixReplayView}).
+   */
+  private replaySuffixAsObjects(
+    graph: EventGraph,
+    checkpoint: CriticalCheckpoint,
+  ): SuffixReplay {
     const sections = graph.planInsertionSuffixSections(
       checkpoint.eventCount,
       checkpoint.version,
@@ -2985,8 +3180,8 @@ export class EgWalkerReplica {
     for (let sectionIndex = 0; sectionIndex < fastForwardEnd; ) {
       const section = sections[sectionIndex]!;
       if (section.linear) {
-        document = this.replayChainAtInsertionRanks(
-          graph,
+        document = this.replayChain(
+          (rank) => graph.operationAtInsertionRank(rank),
           section.start,
           section.end,
           document,
@@ -3050,40 +3245,24 @@ export class EgWalkerReplica {
       graph.getRankedReplayEventsInRange(engineStart, graph.getEventCount()),
       { collectTransformedOperations: false },
     );
-    this.engine = result.engine;
-    this.engineRecoveryAnchor = {
-      kind: "checkpoint",
-      checkpoint: base,
-      estimatedBytes: 0,
-    };
-    this.setReplayCacheBase(base.version, result.replayedEventIds);
-    this.replayCacheEvents = result.replayedEventIds.length;
-    this.replicaPeakSequenceRecordCount = Math.max(
-      this.replicaPeakSequenceRecordCount,
+    return {
+      engine: result.engine,
+      base,
+      textBuffer: result.textBuffer,
       peakSequenceRecordCount,
-    );
-    this.documentBuffer = result.textBuffer;
-    this.documentCache = null;
-    this.currentVersion = frontier;
-    this.restoredSequenceRecords = null;
-    this.restoredDeleteTargets = null;
-    this.partialReplayCount++;
-    this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
-    this.refreshReplayCacheMetrics();
-    this.growReplayCacheBudgetToKeepRebuild(rebuildsRefusedCache);
-    this.evictReplayCacheIfNeeded();
+    };
   }
 
   /**
-   * Apply the chain of events at insertion ranks `[start, end)` to
-   * `document`, validating each operation against the text it edits.
+   * Apply the chain of events `[start, end)` of `operationAt` to `document`,
+   * validating each operation against the text it edits.
    *
    * A long chain goes through a one-shot piece index. Freezing that index
    * rebuilds the whole document, so a short chain edits the persistent rope
    * directly, joining adjacent inserts and deletes into one edit.
    */
-  private replayChainAtInsertionRanks(
-    graph: EventGraph,
+  private replayChain(
+    operationAt: (index: number) => ExternalOperation,
     start: number,
     end: number,
     document: PersistentUtf16Rope,
@@ -3092,7 +3271,7 @@ export class EgWalkerReplica {
       const editor = new TransientUtf16RopeEditor(document);
       for (let rank = start; rank < end; rank++) {
         const operation = this.validateLocalOperation(
-          graph.operationAtInsertionRank(rank),
+          operationAt(rank),
           editor,
         );
         if (operation === null) {
@@ -3124,7 +3303,7 @@ export class EgWalkerReplica {
     };
 
     for (let rank = start; rank < end; rank++) {
-      const operation = graph.operationAtInsertionRank(rank);
+      const operation = operationAt(rank);
       if (operation.type === OPERATION_TYPE.INSERT) {
         if (operation.text.length === 0) {
           continue;

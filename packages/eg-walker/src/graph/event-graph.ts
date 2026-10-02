@@ -37,10 +37,11 @@ import {
   type LinearEventBatch,
   type PackedLinearChainRange,
 } from "./internals/packed-linear-chain";
+import { buildPackedSuffixView } from "./internals/packed-suffix-view";
 import {
   RankedDiffVersionsWorkspace,
   type LocalVersionTransition,
-  type RankedDiffVersionsView,
+  type RankedRangeDiffView,
   type RankedVersionTransition,
 } from "./internals/ranked-diff-versions";
 import {
@@ -224,7 +225,7 @@ export class EventGraph {
    * object for the graph lifetime avoids allocating a view and four
    * capturing closures for every conflicting event.
    */
-  private readonly rankedTraversalView: RankedDiffVersionsView &
+  private readonly rankedTraversalView: RankedRangeDiffView &
     RankedReplayOrderView = {
     eventCount: () => this.getEventCount(),
     insertionRankOf: (id) => this.insertionRankOf(id),
@@ -233,6 +234,7 @@ export class EventGraph {
       this.forEachParentInsertionRank(rank, visit),
     forEachChildRank: (rank, visit) =>
       this.forEachChildInsertionRank(rank, visit),
+    chainStartOf: (rank) => this.chainStartOfInsertionRank(rank),
   };
   private metadata: Record<string, unknown> = {};
   /**
@@ -855,6 +857,36 @@ export class EventGraph {
     return this.packedReplayBase();
   }
 
+  /**
+   * @internal A packed planning view of the events after the first
+   * `prefixEventCount` in insertion order, which must end at a critical
+   * cut, as a trusted checkpoint's does. View offset `k` is local version
+   * `prefixEventCount - 1 + k`; offset 0 stands for the whole prefix. See
+   * {@link buildPackedSuffixView}. A partial replay plans and replays the
+   * events after its checkpoint over this view, so its cost follows those
+   * events instead of the graph.
+   *
+   * Returns `null` when the graph cannot describe the suffix this way; the
+   * caller then replays its events as objects.
+   */
+  getPackedSuffixReplayView(
+    prefixEventCount: number,
+  ): PackedReplayPlanningView | null {
+    return buildPackedSuffixView(
+      {
+        agents: this.agents,
+        eventCount: this.getEventCount(),
+        packedPrefix: this.packedBase,
+        tail: this.tail,
+        localVersionOf: (id) => this.localVersionOf(id),
+        idAtLocalVersion: (localVersion) => this.idAtLocalVersion(localVersion),
+        agentAt: (localVersion) => this.agentAt(localVersion),
+        sequenceAt: (localVersion) => this.sequenceAt(localVersion),
+      },
+      prefixEventCount,
+    );
+  }
+
   private packedReplayBase(): PackedEventGraphBase | null {
     const packedBase = this.packedBase;
     if (this.tail.count === 0) {
@@ -1288,6 +1320,38 @@ export class EventGraph {
     }
     try {
       return workspace.diffLocalVersions(left, right, this.rankedTraversalView);
+    } finally {
+      if (ownsPrimaryWorkspace) {
+        this.rankedDiffWorkspaceInUse = false;
+      }
+    }
+  }
+
+  /**
+   * {@link getLocalVersionTransition} as ranges of local versions, found by
+   * walking causal chains rather than single events.
+   *
+   * @internal The result is a workspace view, valid until the graph's next
+   * version diff. Retreat ranges expand from `end - 1` down to `start` and
+   * advance ranges from `start` up to `end - 1`, both in order.
+   */
+  getLocalVersionRangeTransition(
+    left: ReadonlyArray<number>,
+    right: ReadonlyArray<number>,
+  ): PackedLocalVersionTransition {
+    const workspace = this.rankedDiffWorkspaceInUse
+      ? new RankedDiffVersionsWorkspace()
+      : this.rankedDiffWorkspace;
+    const ownsPrimaryWorkspace = workspace === this.rankedDiffWorkspace;
+    if (ownsPrimaryWorkspace) {
+      this.rankedDiffWorkspaceInUse = true;
+    }
+    try {
+      return workspace.diffLocalVersionRanges(
+        left,
+        right,
+        this.rankedTraversalView,
+      );
     } finally {
       if (ownsPrimaryWorkspace) {
         this.rankedDiffWorkspaceInUse = false;
@@ -1855,6 +1919,19 @@ export class EventGraph {
     return this.tail.isInsertAt(localVersion - packedCount);
   }
 
+  /**
+   * @internal Length of the event's operation at a local version: inserted
+   * code units, or deleted ones.
+   */
+  operationLengthAtLocalVersion(localVersion: number): number {
+    const packedCount = this.packedBase?.count ?? 0;
+    if (localVersion >= 0 && localVersion < packedCount) {
+      return this.packedBase!.operationLengthAt(localVersion);
+    }
+    this.assertTailRank(localVersion);
+    return this.tail.operationLengthAt(localVersion - packedCount);
+  }
+
   /** @internal Visit the parents of the event at a local version. */
   forEachParentLocalVersion(
     localVersion: number,
@@ -1953,6 +2030,27 @@ export class EventGraph {
       }
       visit(parentRank);
     }
+  }
+
+  /**
+   * The lowest rank `start <= rank` such that every event in `(start, rank]`
+   * has the previous rank as its only parent. A packed event's chain starts
+   * no later than its run; a run may also end at a branch, which only makes
+   * the chain shorter than it could be.
+   */
+  private chainStartOfInsertionRank(rank: number): number {
+    const packedBase = this.packedBase;
+    const packedCount = packedBase?.count ?? 0;
+    let packedRank = rank;
+    if (rank >= packedCount) {
+      const start = this.tail.chainStartIndex(rank - packedCount, packedCount);
+      if (start >= 0) {
+        return packedCount + start;
+      }
+      packedRank = packedCount - 1;
+    }
+    const runs = packedBase!.runs;
+    return runs.startOf(runs.runOf(packedRank));
   }
 
   private forEachChildInsertionRank(

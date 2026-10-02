@@ -221,19 +221,71 @@ export class CriticalCheckpointStore {
     return checkpoint;
   }
 
+  /**
+   * Record the cut a partial replay rebuilt its state from.
+   *
+   * A partial replay starts at the newest checkpoint that is still critical
+   * and finds the newest critical cut before the divergence, which can lie
+   * far past that checkpoint. The next event on the same divergence needs
+   * the same cut, and without it would walk that gap again. The cut can be
+   * older than checkpoints recorded since, so it is inserted in event-count
+   * order.
+   */
+  recordReplayBase(
+    version: Version,
+    document: PersistentUtf16Rope,
+    eventCount: number,
+    validatedEventCount: number,
+  ): void {
+    const checkpoints = this.checkpoints;
+    const index = checkpoints.findIndex(
+      (checkpoint) => checkpoint.eventCount >= eventCount,
+    );
+    if (index !== -1 && checkpoints[index]!.eventCount === eventCount) {
+      return;
+    }
+    const checkpoint: CriticalCheckpoint = {
+      version: new Set(version),
+      textBuffer: document,
+      eventCount,
+      criticalityValidation: {
+        validatedEventCount,
+        invalid: false,
+        requiresFullValidation: false,
+      },
+    };
+    const next =
+      index === -1
+        ? [...checkpoints, checkpoint]
+        : [
+            ...checkpoints.slice(0, index),
+            checkpoint,
+            ...checkpoints.slice(index),
+          ];
+    this.checkpoints =
+      next.length <= MAX_RETAINED_CHECKPOINTS ? next : thinCheckpoints(next);
+  }
+
   pickFor(graph: EventGraph): CriticalCheckpoint | null {
-    for (let i = this.checkpoints.length - 1; i >= 0; i--) {
+    let picked: CriticalCheckpoint | null = null;
+    for (let i = this.checkpoints.length - 1; i >= 0 && picked === null; i--) {
       const candidate = this.checkpoints[i];
-      if (!candidate) {
-        continue;
-      }
-      if (this.isStillCritical(graph, candidate)) {
-        this.hitCount++;
-        return candidate;
+      if (candidate && this.isStillCritical(graph, candidate)) {
+        picked = candidate;
       }
     }
-    this.missCount++;
-    return null;
+    // A cut that stopped being critical never becomes critical again, so a
+    // checkpoint that failed the check would only take a slot of the ladder
+    // from a usable one.
+    this.checkpoints = this.checkpoints.filter(
+      (checkpoint) => checkpoint.criticalityValidation?.invalid !== true,
+    );
+    if (picked === null) {
+      this.missCount++;
+    } else {
+      this.hitCount++;
+    }
+    return picked;
   }
 
   private isStillCritical(

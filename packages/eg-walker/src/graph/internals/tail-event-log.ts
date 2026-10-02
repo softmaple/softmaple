@@ -336,6 +336,87 @@ export class TailEventLog implements PackedTailEvents {
     }
   }
 
+  /**
+   * Append, as `GraphRuns.fromExplicitParents` reads them, the parents of
+   * tail events `fromIndex` onwards in a view of the events after insertion
+   * rank `origin`: view offset `k` is rank `origin + k`, and offset 0 stands
+   * for every rank up to `origin`. `baseCount` is the insertion rank of the
+   * first tail event. An event whose parents are just its predecessor in the
+   * view is left out.
+   *
+   * Returns `false`, with the lists partly appended, when an event has no
+   * parent: it does not descend from the events up to `origin`.
+   */
+  appendViewExplicitParents(
+    fromIndex: number,
+    baseCount: number,
+    origin: number,
+    explicit: number[],
+    parentStarts: number[],
+    parents: number[],
+  ): boolean {
+    for (let tailIndex = fromIndex; tailIndex < this.eventCount; tailIndex++) {
+      const offset = baseCount + tailIndex - origin;
+      const parent = this.parents[tailIndex]!;
+      if (parent >= 0) {
+        const parentOffset = parent > origin ? parent - origin : 0;
+        if (parentOffset === offset - 1) {
+          continue;
+        }
+        explicit.push(offset);
+        parents.push(parentOffset);
+        parentStarts.push(parents.length);
+        continue;
+      }
+      if (parent === NO_RANK) {
+        return false;
+      }
+      const start = decodeList(parent);
+      const end = start + 2 + this.multiParentRanks[start]!;
+      const first = parents.length;
+      for (let index = start + 2; index < end; index++) {
+        const rank = this.multiParentRanks[index]!;
+        const parentOffset = rank > origin ? rank - origin : 0;
+        let seen = false;
+        for (let previous = first; previous < parents.length; previous++) {
+          if (parents[previous] === parentOffset) {
+            seen = true;
+            break;
+          }
+        }
+        if (!seen) {
+          parents.push(parentOffset);
+        }
+      }
+      if (parents.length - first === 1 && parents[first] === offset - 1) {
+        parents.length = first;
+        continue;
+      }
+      explicit.push(offset);
+      parentStarts.push(parents.length);
+    }
+    return true;
+  }
+
+  /**
+   * The lowest tail index `start <= tailIndex` such that every event in
+   * `(start, tailIndex]` has the previous insertion rank as its only parent.
+   * `baseCount` is the insertion rank of the first tail event. Returns `-1`
+   * when the chain reaches past tail event 0 into the packed prefix: event
+   * 0's only parent is rank `baseCount - 1`.
+   */
+  chainStartIndex(tailIndex: number, baseCount: number): number {
+    this.assertIndex(tailIndex);
+    const parents = this.parents;
+    let index = tailIndex;
+    while (index > 0 && parents[index] === baseCount + index - 1) {
+      index--;
+    }
+    return index === 0 && baseCount > 0 && parents[0] === baseCount - 1
+      ? -1
+      : index;
+  }
+
   parentCountAt(tailIndex: number): number {
     this.assertIndex(tailIndex);
     const parent = this.parents[tailIndex]!;

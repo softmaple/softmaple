@@ -143,10 +143,11 @@ describe("EgWalkerReplica native snapshots", () => {
       timestamp: 2,
     });
 
-    // Assert
+    // Assert: one look at the event's only parent, which precedes the
+    // restored cut and names one of the base's two events.
     const stats = restored.getReplayStats();
     expect(restored.getText()).toBe("SA");
-    expect(stats.replayCacheCoverageChecks).toBe(2);
+    expect(stats.replayCacheCoverageChecks).toBe(1);
     expect(stats.fullReplays + stats.partialReplays).toBe(1);
   });
 

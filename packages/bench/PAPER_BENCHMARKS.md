@@ -255,8 +255,12 @@ and cold-load measurements.
 default), `detailed` (`applyRemoteEvents`), or `single`, one
 `applyRemoteEvent` call per event, the steady-state path of a live replica.
 `single` ignores `--apply-batch-events`. Every apply line reports
-`applyUsPerEvent` next to `applyMs`. To measure steady-state receive latency
-over the first 100k events:
+`applyUsPerEvent` next to `applyMs`. The batch lanes also time each receive
+call and report the distribution as `batchP50Ms`, `batchP95Ms` and
+`batchMaxMs` (nearest-rank over the run's `applyCalls`); the summary line
+reports their medians over runs. `single` reports `none`: timing every call
+would add two clock reads per event to the lane it measures. To measure
+steady-state receive latency over the first 100k events:
 
 ```bash
 pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \

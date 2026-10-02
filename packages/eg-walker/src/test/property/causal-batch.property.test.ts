@@ -43,9 +43,71 @@ describe("property: strict causal batches", () => {
       fcParams(),
     );
   });
+
+  it(
+    "should always match one whole batch when the trace arrives in consecutive batches",
+    {
+      // Each run also replays every batch's prefix as one batch; under
+      // coverage instrumentation the default run count needs longer than the
+      // default per-test timeout.
+      timeout: 60_000,
+    },
+    () => {
+      fc.assert(
+        fc.property(
+          traceParamsArb({}),
+          fc.array(fc.nat()),
+          (params, cutSeeds) => {
+            // Arrange
+            const events = EventGraph.fromEvents(
+              runTrace(params).events,
+            ).getTopologicalOrder();
+            const ends = batchEnds(cutSeeds, events.length);
+            const batched = new EgWalkerReplica("batched", params.initialText);
+
+            // Act
+            const texts = ends.map((end, index) => {
+              batched.applyCausalBatch(
+                toCausalBatch(events.slice(ends[index - 1] ?? 0, end)),
+              );
+              return batched.getText();
+            });
+
+            // Assert
+            expect(texts).toEqual(
+              ends.map((end) =>
+                wholeBatchText(params.initialText, events.slice(0, end)),
+              ),
+            );
+          },
+        ),
+        fcParams(),
+      );
+    },
+  );
 });
 
 // Helpers
+
+/** Ascending ends of consecutive batches that cover `count` events. */
+const batchEnds = (
+  seeds: ReadonlyArray<number>,
+  count: number,
+): ReadonlyArray<number> =>
+  count === 0
+    ? []
+    : [...new Set([...seeds.map((seed) => 1 + (seed % count)), count])].sort(
+        (left, right) => left - right,
+      );
+
+const wholeBatchText = (
+  initialText: string,
+  events: ReadonlyArray<GraphEvent>,
+): string => {
+  const replica = new EgWalkerReplica("whole", initialText);
+  replica.applyCausalBatch(toCausalBatch(events));
+  return replica.getText();
+};
 
 const toCausalBatch = (events: ReadonlyArray<GraphEvent>) => {
   const builder = createCausalEventBatchBuilder(events.length);

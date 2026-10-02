@@ -2,13 +2,13 @@ import { OPERATION_TYPE } from "../constants/operation-types";
 import { EventGraph } from "../graph/event-graph";
 import { compareEventIds } from "../graph/event-id";
 import type { PackedLocalVersionTransition } from "../graph/internals/packed-diff-versions";
-import type { LocalVersionTransition } from "../graph/internals/ranked-diff-versions";
 import { runSteps, type Steps } from "../graph/internals/steps";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
 import {
   containsUtf16SurrogateCodeUnit,
   PersistentUtf16Rope,
 } from "../text/persistent-utf16-rope";
+import { TransientUtf16RopeEditor } from "../text/transient-utf16-rope";
 import { IndexedSequence } from "./indexed-sequence";
 import {
   DELETE_TARGET_KIND,
@@ -35,6 +35,8 @@ import {
   type IncrementalApplyResult,
   type ItemKey,
 } from "./internals/engine-types";
+import { EngineEventSet } from "./internals/engine-event-set";
+import { PrepareDeltaBuffer } from "./internals/prepare-delta-buffer";
 import { EventItemIndex } from "./internals/event-item-index";
 import { FugueOrderIndex } from "./internals/fugue-order-index";
 import {
@@ -135,9 +137,8 @@ const localVersionsEqual = (
  * and effect-state, walks causal history, and then can be discarded.
  */
 export class EgWalkerEngine {
-  /** Replay order of each event this engine replays, by local version. */
-  private readonly eventOrder = new Map<number, number>();
-  private readonly eventsByOrder: number[] = [];
+  /** The events this engine replays, by local version, in replay order. */
+  private readonly eventOrder = new EngineEventSet();
   private eventIndexesComplete = false;
   private processedEventCount = 0;
   private graph = new EventGraph();
@@ -202,6 +203,11 @@ export class EgWalkerEngine {
   /** The engine's current version, as local versions. */
   private currentVersion: number[] = [];
   private resultingText = PersistentUtf16Rope.from("");
+  /**
+   * Where effect edits go while {@link applyEventBatch} runs; `null`
+   * otherwise, when they edit {@link resultingText} directly.
+   */
+  private textEditor: TransientUtf16RopeEditor | null = null;
   private retreatCount = 0;
   private advanceCount = 0;
   private nonConflictingRunCount = 0;
@@ -219,7 +225,16 @@ export class EgWalkerEngine {
   private packedInsertTail: AugmentedCRDTItem | null = null;
   private packedInsertNextPrepareIndex = -1;
   private readonly packedInsertTailResult: InsertTailResult = { item: null };
-  private readonly prepareDeltas = new Map<AugmentedCRDTItem, number>();
+  private readonly prepareDeltas = new PrepareDeltaBuffer();
+  /**
+   * A placeholder prepare adjustment collected over delete targets with
+   * adjacent ranges; see {@link collectPlaceholderPrepareRange}.
+   */
+  private pendingPlaceholderState: SegmentedPlaceholderState<AugmentedCRDTItem> | null =
+    null;
+  private pendingPlaceholderStart = 0;
+  private pendingPlaceholderEnd = 0;
+  private pendingPlaceholderDelta: 1 | -1 = 1;
 
   generate(
     events: ReadonlyArray<GraphEvent>,
@@ -442,15 +457,13 @@ export class EgWalkerEngine {
     const end = plan.sectionEndAt(endSectionIndex - 1);
     const materializeDeleteKeys = this.deleteTargets.hasPackedOrderRange();
     this.eventOrder.clear();
-    this.eventsByOrder.length = 0;
     for (let orderIndex = start; orderIndex < end; orderIndex++) {
       // Packed offsets are the graph's local versions.
       const eventOffset = plan.eventOffsetAt(orderIndex);
       if (materializeDeleteKeys) {
         this.deleteTargets.materializePackedRecord(orderIndex, eventOffset);
       }
-      this.eventOrder.set(eventOffset, orderIndex - start);
-      this.eventsByOrder.push(eventOffset);
+      this.eventOrder.push(eventOffset);
     }
     if (materializeDeleteKeys) {
       if (this.deleteTargets.hasPackedRecords()) {
@@ -532,15 +545,13 @@ export class EgWalkerEngine {
       deleteTargets: state.deleteTargets,
     });
     engine.eventOrder.clear();
-    engine.eventsByOrder.length = 0;
-    state.eventOrder.forEach((eventId, index) => {
+    for (const eventId of state.eventOrder) {
       const localVersion = graph.localVersionOf(eventId);
       if (localVersion < 0) {
         throw new Error(`Recovery state references missing event ${eventId}`);
       }
-      engine.eventOrder.set(localVersion, index);
-      engine.eventsByOrder.push(localVersion);
-    });
+      engine.eventOrder.push(localVersion);
+    }
     engine.eventIndexesComplete = state.eventIndexesComplete;
     engine.restoreStats(state.stats);
     return engine;
@@ -573,19 +584,66 @@ export class EgWalkerEngine {
     };
   }
 
-  /** @internal Apply an owned receive transaction without per-event text flushes. */
+  /**
+   * @internal Apply an owned receive transaction without per-event text
+   * flushes.
+   *
+   * The batch's effect edits go to a one-shot piece index that is frozen
+   * into the persistent rope once, at the end, instead of each insert and
+   * delete copying a path of the rope. `firstLocalVersion`, when given, is
+   * the local version of `events[0]`: the batch occupies consecutive local
+   * versions, as the events the caller just appended do, so no ID is looked
+   * up. Should a batch throw, the engine is left mid-transition, as before,
+   * and the caller rebuilds it.
+   */
   applyEventBatch(
     events: ReadonlyArray<GraphEvent>,
     graph: EventGraph,
+    firstLocalVersion?: number,
   ): PersistentUtf16Rope {
     this.prepareIncrementalGraph(graph);
-    for (const event of events) {
-      const localVersion = this.requireLocalVersion(event.id);
-      this.registerIncrementalEvent(localVersion);
-      this.processEvent(localVersion, event.operation, false);
+    if (firstLocalVersion !== undefined) {
+      this.assertBatchLocalVersions(events, firstLocalVersion);
     }
-    this.flushPendingInsert();
+    // A single-event apply leaves no insert tail to continue.
+    this.objectInsertTail = null;
+    this.objectInsertNextPrepareIndex = -1;
+    const editor = new TransientUtf16RopeEditor(this.resultingText);
+    this.textEditor = editor;
+    try {
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index]!;
+        const localVersion =
+          firstLocalVersion === undefined
+            ? this.requireLocalVersion(event.id)
+            : firstLocalVersion + index;
+        this.registerIncrementalEvent(localVersion);
+        this.processEvent(localVersion, event.operation, false);
+      }
+      this.flushPendingInsert();
+    } finally {
+      this.textEditor = null;
+    }
+    this.resultingText = editor.finish();
     return this.resultingText;
+  }
+
+  /** Check that a batch's events start at `firstLocalVersion`, in order. */
+  private assertBatchLocalVersions(
+    events: ReadonlyArray<GraphEvent>,
+    firstLocalVersion: number,
+  ): void {
+    const last = events.length - 1;
+    if (
+      last >= 0 &&
+      (this.graph.localVersionOf(events[0]!.id) !== firstLocalVersion ||
+        this.graph.localVersionOf(events[last]!.id) !==
+          firstLocalVersion + last)
+    ) {
+      throw new Error(
+        `Event batch does not start at local version ${firstLocalVersion}`,
+      );
+    }
   }
 
   private prepareIncrementalGraph(graph: EventGraph): void {
@@ -595,9 +653,7 @@ export class EgWalkerEngine {
 
   private registerIncrementalEvent(localVersion: number): void {
     if (this.eventIndexesComplete && !this.eventOrder.has(localVersion)) {
-      const order = this.eventOrder.size;
-      this.eventOrder.set(localVersion, order);
-      this.eventsByOrder.push(localVersion);
+      this.eventOrder.push(localVersion);
     }
   }
 
@@ -640,8 +696,7 @@ export class EgWalkerEngine {
     this.flushPendingInsert();
     this.graph = graph;
     const target = this.localVersionsOf(version);
-    const { retreat, advance } = this.diffVersions(this.currentVersion, target);
-    this.applyObjectPrepareTransition(retreat, advance);
+    this.transitionObjectPrepareView(target);
     this.currentVersion = target;
   }
 
@@ -936,7 +991,7 @@ export class EgWalkerEngine {
       textBuffer: this.resultingText,
       sequenceRecords: this.getSequenceRecords(),
       deleteTargets: this.getDeleteTargetRecords(),
-      eventOrder: this.eventsByOrder.map((localVersion) =>
+      eventOrder: this.eventOrder.order.map((localVersion) =>
         this.graph.idAtLocalVersion(localVersion),
       ),
       eventIndexesComplete: this.eventIndexesComplete,
@@ -946,7 +1001,6 @@ export class EgWalkerEngine {
 
   private restoreSnapshotState(state: EngineSnapshotState): void {
     this.eventOrder.clear();
-    this.eventsByOrder.length = 0;
     this.eventIndexesComplete = false;
     this.graph = state.graph;
     this.eventItems.clear();
@@ -1045,10 +1099,13 @@ export class EgWalkerEngine {
     parents.length = 0;
     this.graph.forEachParentLocalVersion(localVersion, this.pushParent);
     if (localVersionsEqual(parents, this.currentVersion)) {
+      // The event's sole parent is the event applied last, so an insert may
+      // continue the previous one.
       const transformed = this.apply(
         localVersion,
         operation,
         collectTransformedOperations,
+        true,
       );
       this.currentVersion = [localVersion];
       this.nonConflictingRunCount++;
@@ -1057,12 +1114,7 @@ export class EgWalkerEngine {
       return transformed;
     }
 
-    const { retreat, advance } = this.diffVersions(
-      this.currentVersion,
-      parents.slice(),
-    );
-
-    this.applyObjectPrepareTransition(retreat, advance);
+    this.transitionObjectPrepareView(parents);
 
     const transformed = this.apply(
       localVersion,
@@ -1243,137 +1295,196 @@ export class EgWalkerEngine {
   }
 
   /**
-   * Apply one object-backed prepare-view transition as typed-run spans.
+   * Move the prepare view from the current version to `target`, given as
+   * local versions, as typed-run spans.
    *
-   * Scalar retreat/advance used to split a coalesced run once per event and
+   * The diff walks causal chains and returns ranges of local versions, and
+   * the transition consumes them range by range the way a packed replay does:
+   * scalar retreat/advance used to split a coalesced run once per event and
    * update the ranked sequence after every split. Resolve participating
    * delete targets first, isolate only run-span boundaries, accumulate all
-   * prepare deltas, and refresh ranked weights once.
+   * prepare deltas, and refresh ranked weights once. Only events this engine
+   * replays take part; the rest of the graph is in every version it visits.
    */
-  private applyObjectPrepareTransition(
-    retreat: ReadonlyArray<number>,
-    advance: ReadonlyArray<number>,
-  ): void {
+  private transitionObjectPrepareView(target: ReadonlyArray<number>): void {
+    this.ensureEventIndexes();
+    const transition = this.graph.getLocalVersionRangeTransition(
+      this.currentVersion,
+      target,
+    );
     const deltas = this.prepareDeltas;
     deltas.clear();
+    this.pendingPlaceholderState = null;
 
-    const materializeDeleteTargets = this.deleteTargets.hasRunEventTargets();
-    const resolveItemId = (agent: number, sequence: number): ItemKey =>
-      this.resolveRunDeleteTargetItem(agent, sequence).id;
-    const graph = this.graph;
-    const materializeAndCount = (
-      localVersions: ReadonlyArray<number>,
-    ): number => {
-      let knownEventCount = 0;
-      for (const localVersion of localVersions) {
-        if (!this.eventOrder.has(localVersion)) {
-          continue;
-        }
-        knownEventCount++;
-        if (
-          materializeDeleteTargets &&
-          !graph.isInsertAtLocalVersion(localVersion)
+    if (this.deleteTargets.hasRunEventTargets()) {
+      // Lazy scalar delete targets may still share one typed-run record. Split
+      // the targets taking part before insert spans add pending deltas, as a
+      // packed transition does.
+      for (let range = 0; range < transition.retreatRangeCount; range++) {
+        const start = transition.retreatStarts[range]!;
+        for (
+          let localVersion = transition.retreatEnds[range]! - 1;
+          localVersion >= start;
+          localVersion--
         ) {
-          this.deleteTargets.materializeRunEventTargetsOf(
-            localVersion,
-            resolveItemId,
-          );
+          this.materializeRunDeleteTargetsOfEvent(localVersion);
         }
       }
-      return knownEventCount;
-    };
+      for (let range = 0; range < transition.advanceRangeCount; range++) {
+        const end = transition.advanceEnds[range]!;
+        for (
+          let localVersion = transition.advanceStarts[range]!;
+          localVersion < end;
+          localVersion++
+        ) {
+          this.materializeRunDeleteTargetsOfEvent(localVersion);
+        }
+      }
+    }
 
-    const retreated = materializeAndCount(retreat);
-    const advanced = materializeAndCount(advance);
-    this.collectObjectInsertPrepareSpans(retreat, -1, deltas);
-    this.collectObjectInsertPrepareSpans(advance, 1, deltas);
-    this.collectObjectDeletePrepareDeltas(retreat, -1, deltas);
-    this.collectObjectDeletePrepareDeltas(advance, 1, deltas);
+    let retreated = 0;
+    let advanced = 0;
+    for (let range = 0; range < transition.retreatRangeCount; range++) {
+      retreated += this.collectObjectInsertPrepareRange(
+        transition.retreatStarts[range]!,
+        transition.retreatEnds[range]!,
+        -1,
+        deltas,
+      );
+    }
+    for (let range = 0; range < transition.advanceRangeCount; range++) {
+      advanced += this.collectObjectInsertPrepareRange(
+        transition.advanceStarts[range]!,
+        transition.advanceEnds[range]!,
+        1,
+        deltas,
+      );
+    }
+
+    const events = this.eventOrder;
+    const graph = this.graph;
+    for (let range = 0; range < transition.retreatRangeCount; range++) {
+      const start = transition.retreatStarts[range]!;
+      for (
+        let localVersion = transition.retreatEnds[range]! - 1;
+        localVersion >= start;
+        localVersion--
+      ) {
+        if (
+          events.has(localVersion) &&
+          !graph.isInsertAtLocalVersion(localVersion)
+        ) {
+          this.collectDeletePrepareDelta(localVersion, -1, deltas);
+        }
+      }
+    }
+    for (let range = 0; range < transition.advanceRangeCount; range++) {
+      const end = transition.advanceEnds[range]!;
+      for (
+        let localVersion = transition.advanceStarts[range]!;
+        localVersion < end;
+        localVersion++
+      ) {
+        if (
+          events.has(localVersion) &&
+          !graph.isInsertAtLocalVersion(localVersion)
+        ) {
+          this.collectDeletePrepareDelta(localVersion, 1, deltas);
+        }
+      }
+    }
+
     this.applyCollectedPrepareDeltas(deltas);
     this.retreatCount += retreated;
     this.advanceCount += advanced;
   }
 
-  private collectObjectInsertPrepareSpans(
-    localVersions: ReadonlyArray<number>,
-    delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
-  ): void {
-    const graph = this.graph;
-    const isKnownInsert = (localVersion: number): boolean =>
+  private materializeRunDeleteTargetsOfEvent(localVersion: number): void {
+    if (
       this.eventOrder.has(localVersion) &&
-      graph.isInsertAtLocalVersion(localVersion);
-    let groupStart = 0;
-    while (groupStart < localVersions.length) {
-      const first = localVersions[groupStart]!;
-      if (!isKnownInsert(first)) {
-        groupStart++;
-        continue;
-      }
-
-      const agent = graph.agentAt(first);
-      let groupEnd = groupStart + 1;
-      if (agent >= 0) {
-        let expectedSequence = graph.sequenceAt(first) + delta;
-        while (groupEnd < localVersions.length) {
-          const next = localVersions[groupEnd]!;
-          if (
-            !isKnownInsert(next) ||
-            graph.agentAt(next) !== agent ||
-            graph.sequenceAt(next) !== expectedSequence
-          ) {
-            break;
-          }
-          expectedSequence += delta;
-          groupEnd++;
-        }
-      }
-
-      const groupLength = groupEnd - groupStart;
-      let consumed = 0;
-      while (consumed < groupLength) {
-        const eventIndex =
-          delta === 1 ? groupStart + consumed : groupEnd - consumed - 1;
-        const localVersion = localVersions[eventIndex]!;
-        const item = this.recordSplitter.isolateRunSpanForEvents(
-          localVersion,
-          groupLength - consumed,
-        );
-        if (item === null) {
-          this.collectInsertPrepareDelta(localVersion, delta, deltas);
-          consumed++;
-          continue;
-        }
-
-        const isolatedEventCount = item.content.length;
-        if (
-          isolatedEventCount <= 0 ||
-          isolatedEventCount > groupLength - consumed
-        ) {
-          throw new Error(
-            `Invalid typed-run transition span at event ${localVersion}`,
-          );
-        }
-        this.collectPrepareDeltaForItem(item, delta, deltas);
-        consumed += isolatedEventCount;
-      }
-      groupStart = groupEnd;
+      !this.graph.isInsertAtLocalVersion(localVersion)
+    ) {
+      this.deleteTargets.materializeRunEventTargetsOf(
+        localVersion,
+        this.resolveRunDeleteTargetItemId,
+      );
     }
   }
 
-  private collectObjectDeletePrepareDeltas(
-    localVersions: ReadonlyArray<number>,
-    delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
-  ): void {
-    for (const localVersion of localVersions) {
-      if (
-        this.eventOrder.has(localVersion) &&
-        !this.graph.isInsertAtLocalVersion(localVersion)
-      ) {
-        this.collectDeletePrepareDelta(localVersion, delta, deltas);
+  private readonly resolveRunDeleteTargetItemId = (
+    agent: number,
+    sequence: number,
+  ): ItemKey => this.resolveRunDeleteTargetItem(agent, sequence).id;
+
+  /**
+   * Collect the inserts of one transition range of local versions and
+   * return how many of this engine's events, inserts and deletes, the range
+   * holds. Adjacent canonical scalar inserts are grouped by author sequence,
+   * then consumed one existing typed-run fragment at a time, as
+   * {@link collectPackedInsertPrepareRange} does over packed offsets.
+   */
+  private collectObjectInsertPrepareRange(
+    start: number,
+    end: number,
+    direction: 1 | -1,
+    deltas: PrepareDeltaBuffer,
+  ): number {
+    const events = this.eventOrder;
+    const graph = this.graph;
+    const isScalarInsert = (localVersion: number): boolean =>
+      graph.isInsertAtLocalVersion(localVersion) &&
+      graph.operationLengthAtLocalVersion(localVersion) === 1;
+    let engineEvents = 0;
+    let localVersion = direction === 1 ? start : end - 1;
+    while (direction === 1 ? localVersion < end : localVersion >= start) {
+      if (!events.has(localVersion)) {
+        localVersion += direction;
+        continue;
       }
+      engineEvents++;
+      if (!graph.isInsertAtLocalVersion(localVersion)) {
+        localVersion += direction;
+        continue;
+      }
+
+      const agent = isScalarInsert(localVersion)
+        ? graph.agentAt(localVersion)
+        : CUSTOM_EVENT_AGENT;
+      let groupLength = 1;
+      let groupTail = localVersion;
+      let scan = localVersion + direction;
+      if (agent >= 0) {
+        let expectedSequence = graph.sequenceAt(localVersion) + direction;
+        while (direction === 1 ? scan < end : scan >= start) {
+          if (
+            !events.has(scan) ||
+            !isScalarInsert(scan) ||
+            graph.agentAt(scan) !== agent ||
+            graph.sequenceAt(scan) !== expectedSequence
+          ) {
+            break;
+          }
+          groupLength++;
+          groupTail = scan;
+          expectedSequence += direction;
+          scan += direction;
+        }
+        const first = direction === 1 ? localVersion : groupTail;
+        this.collectPackedInsertPrepareSpan(
+          first,
+          groupLength,
+          direction,
+          deltas,
+          agent,
+          graph.sequenceAt(first),
+        );
+      } else {
+        this.collectInsertPrepareDelta(localVersion, direction, deltas);
+      }
+      engineEvents += groupLength - 1;
+      localVersion = scan;
     }
+    return engineEvents;
   }
 
   private applyPackedPrepareTransition(
@@ -1384,6 +1495,7 @@ export class EgWalkerEngine {
   ): void {
     const deltas = this.prepareDeltas;
     deltas.clear();
+    this.pendingPlaceholderState = null;
 
     // Lazy scalar delete targets may still share one typed-run record. Split
     // targets participating in this transition before insert spans add
@@ -1461,25 +1573,19 @@ export class EgWalkerEngine {
     this.applyCollectedPrepareDeltas(deltas);
   }
 
-  private applyCollectedPrepareDeltas(
-    deltas: Map<AugmentedCRDTItem, number>,
-  ): void {
-    if (deltas.size === 0) {
-      return;
-    }
-    if (deltas.size === 1) {
-      for (const [item, delta] of deltas) {
-        item.prepareState += delta;
-        this.sequence.updateItem(item);
+  private applyCollectedPrepareDeltas(deltas: PrepareDeltaBuffer): void {
+    this.flushPlaceholderPrepareRange(deltas);
+    const items = deltas.entryItems();
+    if (items.length === 1) {
+      const item = items[0]!;
+      item.prepareState += deltas.deltaOf(item);
+      this.sequence.updateItem(item);
+    } else if (items.length > 1) {
+      for (const item of items) {
+        item.prepareState += deltas.deltaOf(item);
       }
-      deltas.clear();
-      return;
+      this.sequence.updateItems(items);
     }
-
-    for (const [item, delta] of deltas) {
-      item.prepareState += delta;
-    }
-    this.sequence.updateItems(deltas.keys());
     deltas.clear();
   }
 
@@ -1565,7 +1671,7 @@ export class EgWalkerEngine {
     direction: 1 | -1,
     rangeStart: number,
     rangeEnd: number,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
     let offset = direction === 1 ? startOffset : endOffset - 1;
     while (direction === 1 ? offset < endOffset : offset >= startOffset) {
@@ -1642,7 +1748,7 @@ export class EgWalkerEngine {
     firstOffset: number,
     eventCount: number,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
     agent: number,
     firstSequence: number,
   ): void {
@@ -2026,17 +2132,14 @@ export class EgWalkerEngine {
         this.graph.addEvent(event);
       }
     }
-    graphEvents.forEach((event, index) => {
-      const localVersion = this.requireLocalVersion(event.id);
-      this.eventOrder.set(localVersion, index);
-      this.eventsByOrder.push(localVersion);
-    });
+    for (const event of graphEvents) {
+      this.eventOrder.push(this.requireLocalVersion(event.id));
+    }
     this.eventIndexesComplete = true;
   }
 
   private resetState(initialText: string, options: GenerateOptions): void {
     this.eventOrder.clear();
-    this.eventsByOrder.length = 0;
     this.eventIndexesComplete = false;
     this.graph = options.eventGraph ?? new EventGraph();
     this.eventItems.clear();
@@ -2165,6 +2268,7 @@ export class EgWalkerEngine {
     localVersion: number,
     operation: ExternalOperation,
     collectTransformedOperations: boolean,
+    mayContinuePreviousInsert = false,
   ): ReadonlyArray<ExternalOperation> {
     if (operation.type === OPERATION_TYPE.INSERT) {
       this.assertOperationInPrepareView(
@@ -2173,6 +2277,17 @@ export class EgWalkerEngine {
         operation.text.length,
         false,
       );
+      // An insert right after the previous one, which is its sole parent,
+      // lands after that insert's record, as in a packed replay, without
+      // searching for its position and origins. applyInsert searches anyway
+      // if the record has since gained a sibling or left the prepare view.
+      const knownTail =
+        mayContinuePreviousInsert &&
+        !collectTransformedOperations &&
+        this.objectInsertTail !== null &&
+        operation.index === this.objectInsertNextPrepareIndex
+          ? this.objectInsertTail
+          : null;
       const transformed = applyInsert(
         localVersion,
         this.graph.agentAt(localVersion),
@@ -2182,7 +2297,7 @@ export class EgWalkerEngine {
         this.insertDeps,
         collectTransformedOperations,
         this.deferTextMaterialization,
-        null,
+        knownTail,
         collectTransformedOperations ? undefined : this.objectInsertTailResult,
       );
       if (!collectTransformedOperations) {
@@ -2297,7 +2412,7 @@ export class EgWalkerEngine {
   private collectInsertPrepareDelta(
     localVersion: number,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
     const eventItems =
       this.recordSplitter.isolateRunSliceForEvent(localVersion);
@@ -2313,7 +2428,7 @@ export class EgWalkerEngine {
   private collectDeletePrepareDelta(
     localVersion: number,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
     this.collectDeletePrepareTargets(
       this.deleteTargets.firstTargetOf(localVersion),
@@ -2326,7 +2441,7 @@ export class EgWalkerEngine {
     eventOffset: number,
     orderIndex: number,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
     const packedTarget =
       this.deleteTargets.firstTargetOfPackedOrder(orderIndex);
@@ -2340,7 +2455,7 @@ export class EgWalkerEngine {
   private collectDeletePrepareTargets(
     firstTarget: number,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
     let target = firstTarget;
     while (target !== 0) {
@@ -2356,24 +2471,76 @@ export class EgWalkerEngine {
           `Packed transition did not materialize typed-run target ${this.deleteTargets.runEventAgentOf(target)}:${this.deleteTargets.runEventSequenceOf(target)}`,
         );
       } else {
-        for (const slice of this.deleteTargets
-          .placeholderStateOf(target)
-          .adjustPrepareRange(
-            this.deleteTargets.placeholderStartOf(target),
-            this.deleteTargets.placeholderEndOf(target),
-            delta,
-          )) {
-          const item = slice.owner;
-          if (item !== null && !deltas.has(item)) {
-            // The segmented state already absorbed the delta. A zero entry
-            // keeps the physical slice in the one batched ranked-weight
-            // refresh without applying the same prepare delta to its scalar
-            // compatibility fields.
-            deltas.set(item, 0);
-          }
-        }
+        this.collectPlaceholderPrepareRange(
+          this.deleteTargets.placeholderStateOf(target),
+          this.deleteTargets.placeholderStartOf(target),
+          this.deleteTargets.placeholderEndOf(target),
+          delta,
+          deltas,
+        );
       }
       target = this.deleteTargets.nextTarget(target);
+    }
+  }
+
+  /**
+   * Adjust the prepare state of a placeholder range, joined to the pending
+   * adjustment when the two ranges are adjacent.
+   *
+   * A line deleted from a checkpoint's text is one delete per character, and
+   * a transition retreats or advances those deletes in order, so their
+   * targets are adjacent ranges of one placeholder. Adjusting each range on
+   * its own updates the segment tree and the cached lengths of its slices
+   * once per character. Adjustments commute, so adjacent ranges with the
+   * same delta are adjusted as one; a range that overlaps the pending one,
+   * from a concurrent delete of the same character, starts a new one.
+   */
+  private collectPlaceholderPrepareRange(
+    state: SegmentedPlaceholderState<AugmentedCRDTItem>,
+    start: number,
+    end: number,
+    delta: 1 | -1,
+    deltas: PrepareDeltaBuffer,
+  ): void {
+    if (
+      this.pendingPlaceholderState === state &&
+      this.pendingPlaceholderDelta === delta
+    ) {
+      if (start === this.pendingPlaceholderEnd) {
+        this.pendingPlaceholderEnd = end;
+        return;
+      }
+      if (end === this.pendingPlaceholderStart) {
+        this.pendingPlaceholderStart = start;
+        return;
+      }
+    }
+    this.flushPlaceholderPrepareRange(deltas);
+    this.pendingPlaceholderState = state;
+    this.pendingPlaceholderStart = start;
+    this.pendingPlaceholderEnd = end;
+    this.pendingPlaceholderDelta = delta;
+  }
+
+  private flushPlaceholderPrepareRange(deltas: PrepareDeltaBuffer): void {
+    const state = this.pendingPlaceholderState;
+    if (state === null) {
+      return;
+    }
+    this.pendingPlaceholderState = null;
+    for (const slice of state.adjustPrepareRange(
+      this.pendingPlaceholderStart,
+      this.pendingPlaceholderEnd,
+      this.pendingPlaceholderDelta,
+    )) {
+      const item = slice.owner;
+      if (item !== null) {
+        // The segmented state already absorbed the delta. A zero entry
+        // keeps the physical slice in the one batched ranked-weight
+        // refresh without applying the same prepare delta to its scalar
+        // compatibility fields.
+        deltas.touch(item);
+      }
     }
   }
 
@@ -2403,7 +2570,7 @@ export class EgWalkerEngine {
   private collectItemPrepareDelta(
     itemId: ItemKey,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
     this.collectPrepareDeltaForItem(this.requireItem(itemId), delta, deltas);
   }
@@ -2411,14 +2578,9 @@ export class EgWalkerEngine {
   private collectPrepareDeltaForItem(
     item: AugmentedCRDTItem,
     delta: 1 | -1,
-    deltas: Map<AugmentedCRDTItem, number>,
+    deltas: PrepareDeltaBuffer,
   ): void {
-    const next = (deltas.get(item) ?? 0) + delta;
-    if (next === 0) {
-      deltas.delete(item);
-    } else {
-      deltas.set(item, next);
-    }
+    deltas.add(item, delta);
   }
 
   private itemToEffectIndex(target: AugmentedCRDTItem): number {
@@ -2474,6 +2636,10 @@ export class EgWalkerEngine {
     effectIndex: number,
     text: string,
   ): void => {
+    if (this.textEditor !== null) {
+      this.textEditor.insert(effectIndex, text);
+      return;
+    }
     this.resultingText = this.resultingText.insert(effectIndex, text);
   };
 
@@ -2495,6 +2661,10 @@ export class EgWalkerEngine {
     flushPendingInsert: () => this.flushPendingInsert(),
     itemToEffectIndex: (target) => this.itemToEffectIndex(target),
     insertText: (index, text) => {
+      if (this.textEditor !== null) {
+        this.textEditor.insert(index, text);
+        return;
+      }
       this.resultingText = this.resultingText.insert(index, text);
     },
     recordIntegrationProbe: () => {
@@ -2511,6 +2681,10 @@ export class EgWalkerEngine {
     flushPendingInsert: () => this.flushPendingInsert(),
     itemToEffectIndex: (target) => this.itemToEffectIndex(target),
     deleteText: (index, length) => {
+      if (this.textEditor !== null) {
+        this.textEditor.delete(index, length);
+        return;
+      }
       this.resultingText = this.resultingText.delete(index, length);
     },
   };
@@ -2519,35 +2693,14 @@ export class EgWalkerEngine {
     this.pendingInsert.flush(this.applyPendingSplice);
   }
 
-  private diffVersions(
-    currentVersion: ReadonlyArray<number>,
-    targetVersion: ReadonlyArray<number>,
-  ): LocalVersionTransition {
-    this.ensureEventIndexes();
-    const transition = this.graph.getLocalVersionTransition(
-      currentVersion,
-      targetVersion,
-    );
-    if (this.eventOrder.size === this.graph.getEventCount()) {
-      return transition;
-    }
-    return {
-      retreat: transition.retreat.filter((lv) => this.eventOrder.has(lv)),
-      advance: transition.advance.filter((lv) => this.eventOrder.has(lv)),
-    };
-  }
-
   private ensureEventIndexes(): void {
     if (this.eventIndexesComplete) {
       return;
     }
     this.eventOrder.clear();
-    this.eventsByOrder.length = 0;
-    this.graph.getTopologicalOrder().forEach((event, index) => {
-      const localVersion = this.requireLocalVersion(event.id);
-      this.eventOrder.set(localVersion, index);
-      this.eventsByOrder.push(localVersion);
-    });
+    for (const event of this.graph.getTopologicalOrder()) {
+      this.eventOrder.push(this.requireLocalVersion(event.id));
+    }
     this.eventIndexesComplete = true;
   }
 

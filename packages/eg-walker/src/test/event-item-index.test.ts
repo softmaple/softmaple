@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AugmentedCRDTItem } from "../engine/internals/engine-types";
 import { EventItemIndex } from "../engine/internals/event-item-index";
+import { crdtItem } from "./test-helpers";
 
 // Events are canonical `agent:sequence` IDs; each test graph maps local
 // version `agent * 100 + sequence` to that pair. Local version -1 stands for
@@ -35,18 +36,19 @@ const runItem = (
   agent: number,
   startSequence: number,
   content: string,
-): AugmentedCRDTItem => ({
-  id: keyOf(name),
-  agent,
-  sequence: startSequence,
-  offset: 0,
-  content,
-  originLeft: null,
-  originRight: null,
-  everDeleted: false,
-  prepareState: 1,
-  run: true,
-});
+): AugmentedCRDTItem =>
+  crdtItem({
+    id: keyOf(name),
+    agent,
+    sequence: startSequence,
+    offset: 0,
+    content,
+    originLeft: null,
+    originRight: null,
+    everDeleted: false,
+    prepareState: 1,
+    run: true,
+  });
 
 describe("EventItemIndex typed-run ranges", () => {
   it("resolves repeated splits without per-event direct entries", () => {
@@ -122,5 +124,25 @@ describe("EventItemIndex typed-run ranges", () => {
 
     index.clear();
     expect(index.get(lv(AGENT_REPLICA, 3))).toBeUndefined();
+  });
+
+  it("extends only runs registered since the last clear of the same index", () => {
+    // Arrange
+    const index = createIndex();
+    const other = createIndex();
+    const cleared = runItem("cleared", AGENT_REPLICA, 0, "a");
+    const foreign = runItem("foreign", AGENT_AUTHOR, 0, "a");
+    index.registerRunItem(cleared);
+    other.registerRunItem(foreign);
+
+    // Act
+    index.clear();
+
+    // Assert
+    expect(index.canExtendRunItem(cleared, 1)).toBe(false);
+    expect(index.canExtendRunItem(foreign, 1)).toBe(false);
+    expect(other.canExtendRunItem(foreign, 1)).toBe(true);
+    index.registerRunItem(cleared);
+    expect(index.canExtendRunItem(cleared, 1)).toBe(true);
   });
 });

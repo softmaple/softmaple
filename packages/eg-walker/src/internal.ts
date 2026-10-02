@@ -11,7 +11,10 @@ export {
   EgWalkerEngine,
   type GeneratedDocument,
 } from "./engine/eg-walker-engine";
-export { IndexedSequence } from "./engine/indexed-sequence";
+export {
+  IndexedSequence,
+  type IndexedSequenceItem,
+} from "./engine/indexed-sequence";
 export {
   FugueOrderIndex,
   type FugueOrderStats,

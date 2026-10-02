@@ -154,9 +154,10 @@ export class ItemIdCodec {
         everDeleted: record.everDeleted,
         prepareState: record.prepareState,
         run: identity.run,
-        ...(identity.external === undefined
-          ? {}
-          : { external: identity.external }),
+        placeholder: undefined,
+        external: identity.external,
+        sequenceLeaf: null,
+        runNode: null,
       };
     });
   }

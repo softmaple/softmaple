@@ -55,6 +55,7 @@ up automatically.
 | [`deferred-text-materialization.property.test.ts`](./deferred-text-materialization.property.test.ts) | Deferred cold replay produces the same text and transient records as eager replay.                      |
 | [`linear-remote-batch.property.test.ts`](./linear-remote-batch.property.test.ts) | Exact chains split into batches match single-event delivery in results, text and graph, then merge a concurrent edit. |
 | [`paste-typing-equivalence.property.test.ts`](./paste-typing-equivalence.property.test.ts) | Pasting each insert as one event and typing it one scalar per event produce identical documents under random concurrent edits, live and after a cold load. |
+| [`indexed-sequence.property.test.ts`](./indexed-sequence.property.test.ts) | Under ranked and object-anchored inserts, record splits and weight updates, `IndexedSequence` resolves every item to its array position and every rank to the array's prefix sums. |
 
 ## Shared helpers
 

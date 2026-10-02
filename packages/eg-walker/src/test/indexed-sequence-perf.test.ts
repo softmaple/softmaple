@@ -21,10 +21,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { IndexedSequence } from "../engine/indexed-sequence";
-import { createPrng } from "./test-helpers";
+import {
+  IndexedSequence,
+  type IndexedSequenceItem,
+} from "../engine/indexed-sequence";
+import { createPrng, unindexed } from "./test-helpers";
 
-interface PerfItem {
+interface PerfItem extends IndexedSequenceItem<PerfItem> {
   id: number;
   prepare: number;
   effect: number;
@@ -39,11 +42,11 @@ const buildSequence = (
     (item) => item.effect,
   );
   for (let index = 0; index < size; index++) {
-    const item: PerfItem = {
+    const item: PerfItem = unindexed({
       id: index,
       prepare: index % 3 === 0 ? 0 : 1,
       effect: index % 5 === 0 ? 0 : 1,
-    };
+    });
     items.push(item);
     sequence.push(item);
   }
@@ -125,15 +128,15 @@ describe("IndexedSequence focused performance", () => {
 
   it("positionOf stays correct after interleaved inserts that shift cached offsets", () => {
     // Regression guard for the cached leaf offset: inserting before
-    // an existing item must update every later item's cached offset
-    // so subsequent positionOf calls do not return stale indexes.
+    // an existing item leaves its cached offset behind, so positionOf
+    // must scan forward from it instead of returning a stale index.
     const sequence = new IndexedSequence<PerfItem>(
       (item) => item.prepare,
       (item) => item.effect,
     );
     const items: PerfItem[] = [];
     for (let index = 0; index < 300; index++) {
-      const item: PerfItem = { id: index, prepare: 1, effect: 1 };
+      const item: PerfItem = unindexed({ id: index, prepare: 1, effect: 1 });
       items.push(item);
       sequence.push(item);
     }
@@ -142,11 +145,11 @@ describe("IndexedSequence focused performance", () => {
     const model: PerfItem[] = [...items];
     for (let step = 0; step < 200; step++) {
       const insertAt = Math.floor(rand() * (model.length + 1));
-      const inserted: PerfItem = {
+      const inserted: PerfItem = unindexed({
         id: 1_000_000 + step,
         prepare: 1,
         effect: 1,
-      };
+      });
       model.splice(insertAt, 0, inserted);
       sequence.insert(insertAt, inserted);
     }
@@ -176,11 +179,11 @@ describe("IndexedSequence focused performance", () => {
     for (let step = 0; step < 4_000; step++) {
       const decision = rand();
       if (decision < 0.55 || model.length === 0) {
-        const item: PerfItem = {
+        const item: PerfItem = unindexed({
           id: step,
           prepare: rand() < 0.7 ? 1 : 0,
           effect: rand() < 0.7 ? 1 : 0,
-        };
+        });
         const at = Math.floor(rand() * (model.length + 1));
         model.splice(at, 0, item);
         sequence.insert(at, item);

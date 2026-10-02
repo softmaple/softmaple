@@ -269,6 +269,10 @@ export const applyInsert = (
     everDeleted: false,
     prepareState: 1,
     run: canonical && insertedText.length === 1,
+    placeholder: undefined,
+    external: undefined,
+    sequenceLeaf: null,
+    runNode: null,
   };
   const indexedFirstPosition =
     useOracle || conflictRegionEmpty ? null : fugueOrder.integrate(firstItem);

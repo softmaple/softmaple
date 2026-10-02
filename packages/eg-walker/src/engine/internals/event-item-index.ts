@@ -9,14 +9,28 @@ export interface EventIdentityResolver {
   sequenceAt(localVersion: number): number;
 }
 
-interface RunItemNode {
+/**
+ * Treap node of one typed-run record. The record also points at it, through
+ * {@link AugmentedCRDTItem.runNode}, in place of a side table keyed by the
+ * record.
+ */
+export interface RunItemNode {
   readonly item: AugmentedCRDTItem;
+  /** Lifetime of the index that created the node. */
+  readonly epoch: number;
   readonly startSequence: number;
   readonly priority: number;
   nextStartSequence: number;
   left: RunItemNode | null;
   right: RunItemNode | null;
 }
+
+/**
+ * Every index lifetime takes its number from this one counter, so a run node
+ * of a cleared or a different index never matches the current lifetime.
+ */
+let lastRunIndexEpoch = 0;
+const nextRunIndexEpoch = (): number => ++lastRunIndexEpoch;
 
 /**
  * Event -> CRDT item lookup used by retreat / advance.
@@ -40,7 +54,8 @@ export class EventItemIndex {
    */
   private readonly fragmentOwners = new Map<ItemKey, number>();
   private runRootsByAgent: Array<RunItemNode | undefined> = [];
-  private runNodesByItem = new WeakMap<AugmentedCRDTItem, RunItemNode>();
+  /** Lifetime of the run treaps; {@link clear} starts a new one. */
+  private epoch = nextRunIndexEpoch();
 
   constructor(private readonly events: EventIdentityResolver) {}
 
@@ -48,7 +63,7 @@ export class EventItemIndex {
     this.direct.clear();
     this.fragmentOwners.clear();
     this.runRootsByAgent = [];
-    this.runNodesByItem = new WeakMap<AugmentedCRDTItem, RunItemNode>();
+    this.epoch = nextRunIndexEpoch();
   }
 
   set(localVersion: number, itemIds: ItemKey[]): void {
@@ -173,6 +188,7 @@ export class EventItemIndex {
 
     const node: RunItemNode = {
       item,
+      epoch: this.epoch,
       startSequence,
       priority: sequencePriority(startSequence),
       nextStartSequence: successor?.startSequence ?? Number.POSITIVE_INFINITY,
@@ -180,7 +196,7 @@ export class EventItemIndex {
       right: null,
     };
     this.runRootsByAgent[item.agent] = insertRunNode(root, node);
-    this.runNodesByItem.set(item, node);
+    item.runNode = node;
     if (predecessor !== null) {
       predecessor.nextStartSequence = node.startSequence;
     }
@@ -197,8 +213,8 @@ export class EventItemIndex {
     if (!Number.isSafeInteger(additionalLength) || additionalLength <= 0) {
       return false;
     }
-    const node = this.runNodesByItem.get(item);
-    if (node === undefined || !item.run) {
+    const node = item.runNode;
+    if (node === null || node.epoch !== this.epoch || !item.run) {
       return false;
     }
     const nextEnd = node.startSequence + item.content.length + additionalLength;

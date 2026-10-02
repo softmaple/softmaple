@@ -1,14 +1,21 @@
 import {
+  ANCHOR_WEIGHT,
   BRANCH_FACTOR,
+  EFFECT_WEIGHT,
   LEAF_CAPACITY,
+  PREPARE_WEIGHT,
+  WEIGHT_STRIDE,
   createInternal,
   createLeaf,
   type IndexedNode,
+  type IndexedSequenceItem,
   type InternalNode,
-  type ItemLocation,
   type LeafNode,
+  type SequenceTree,
 } from "./internals/indexed-sequence-node";
 import { OrderMaintenanceList } from "./internals/order-maintenance-list";
+
+export type { IndexedSequenceItem } from "./internals/indexed-sequence-node";
 
 /**
  * Sentinel thrown by the ranked B-tree's prepare/effect index lookups when
@@ -38,24 +45,32 @@ type WeightOffsetResolver<T> = (
  *
  * Each leaf stores a cache-sized run of CRDT items and each internal edge keeps
  * three ranks: record count, prepare-visible count, and effect-visible count.
- * This mirrors the paper's B-tree indexes while the separate WeakMap provides
- * O(log n) event-ID-to-record mapping after the caller resolves the event ID.
+ * This mirrors the paper's B-tree indexes. Each item records the leaf that
+ * holds it ({@link IndexedSequenceItem}), so an object-anchored operation
+ * starts at that leaf after the caller resolves the event ID to a record.
+ *
+ * An item belongs to at most one live sequence. Inserting an item that a live
+ * sequence holds throws, except that `insertAfter` and `updateAndInsertAfter`
+ * return `false` for an item this sequence holds. Clearing a sequence
+ * releases its items.
  *
  * The hot maintenance paths — single-item inserts, weight updates, and
  * `positionOf` lookups — all run in O(log n):
  *   - Inserts and weight updates propagate `(size, prepareSum, effectSum)`
  *     deltas to ancestors instead of recomputing every internal node's
  *     sums from its children.
- *   - Each item caches its offset inside its leaf, and each node caches
- *     its index inside its parent, so `positionOf` and `positionOfNode`
- *     skip the inner `Array.indexOf` scans.
+ *   - Each item records its leaf and its offset is found by scanning that
+ *     leaf, at most 32 slots, so an insert shifts the slots after it
+ *     without touching the shifted items. Each node caches its index
+ *     inside its parent, so `positionOfNode` skips the inner
+ *     `Array.indexOf` scans.
  *   - Splits do not propagate deltas at all: the moved subtree's weight
  *     leaves one parent edge and joins another, so the grandparent sums
  *     are unchanged by construction.
  */
-export class IndexedSequence<T extends object> {
+export class IndexedSequence<T extends IndexedSequenceItem<T>> {
   private root: IndexedNode<T> | null = null;
-  private locationsByItem = new WeakMap<T, ItemLocation<T>>();
+  private tree: SequenceTree = { live: true };
   private readonly leafOrder = new OrderMaintenanceList<LeafNode<T>>();
   private structuralOperationCount = 0;
   private weightUpdateGeneration = 0;
@@ -70,7 +85,7 @@ export class IndexedSequence<T extends object> {
    * records are available: it preserves the same public behavior as passing
    * `items` to the constructor while making the bulk-restore intent explicit.
    */
-  static fromRecords<T extends object>(
+  static fromRecords<T extends IndexedSequenceItem<T>>(
     records: ReadonlyArray<T>,
     prepareWeight: (item: T) => number,
     effectWeight: (item: T) => number,
@@ -171,11 +186,11 @@ export class IndexedSequence<T extends object> {
   }
 
   positionOf(item: T): number {
-    const location = this.resolveLocation(item);
-    if (!location) {
+    const leaf = this.leafOf(item);
+    if (leaf === null) {
       return -1;
     }
-    return this.positionOfNode(location.leaf) + location.offsetInLeaf;
+    return this.positionOfNode(leaf) + this.offsetInLeaf(leaf, item);
   }
 
   /** Compare two resident items by sequence order without a rank walk. */
@@ -186,22 +201,25 @@ export class IndexedSequence<T extends object> {
     if (left === right) {
       return 0;
     }
-    const leftLocation = this.resolveLocation(left);
-    const rightLocation = this.resolveLocation(right);
-    if (leftLocation === undefined || rightLocation === undefined) {
+    const leftLeaf = this.leafOf(left);
+    const rightLeaf = this.leafOf(right);
+    if (leftLeaf === null || rightLeaf === null) {
       throw new Error("Indexed sequence item is unavailable");
     }
-    if (leftLocation.leaf === rightLocation.leaf) {
-      return leftLocation.offsetInLeaf < rightLocation.offsetInLeaf ? -1 : 1;
+    if (leftLeaf === rightLeaf) {
+      return this.offsetInLeaf(leftLeaf, left) <
+        this.offsetInLeaf(rightLeaf, right)
+        ? -1
+        : 1;
     }
-    return this.leafOrder.compare(leftLocation.leaf, rightLocation.leaf);
+    return this.leafOrder.compare(leftLeaf, rightLeaf);
   }
 
   /**
    * Return whether `right` immediately follows `left` in sequence order.
    *
    * Leaf-order tracking makes the cross-leaf case a constant-time neighbour
-   * check. Within one leaf, the cached item offsets are sufficient. As with
+   * check. Within one leaf, the slot after `left` is sufficient. As with
    * {@link compareOrder}, callers must opt into order tracking when creating
    * the sequence.
    */
@@ -213,34 +231,31 @@ export class IndexedSequence<T extends object> {
       return false;
     }
 
-    const leftLocation = this.resolveLocation(left);
-    const rightLocation = this.resolveLocation(right);
-    if (leftLocation === undefined || rightLocation === undefined) {
+    const leftLeaf = this.leafOf(left);
+    const rightLeaf = this.leafOf(right);
+    if (leftLeaf === null || rightLeaf === null) {
       return false;
     }
-    if (leftLocation.leaf === rightLocation.leaf) {
-      return rightLocation.offsetInLeaf === leftLocation.offsetInLeaf + 1;
+    if (leftLeaf === rightLeaf) {
+      return leftLeaf.items[this.offsetInLeaf(leftLeaf, left) + 1] === right;
     }
     return (
-      leftLocation.offsetInLeaf === leftLocation.leaf.items.length - 1 &&
-      rightLocation.offsetInLeaf === 0 &&
-      leftLocation.leaf.orderNext === rightLocation.leaf
+      leftLeaf.items[leftLeaf.items.length - 1] === left &&
+      rightLeaf.items[0] === right &&
+      leftLeaf.orderNext === rightLeaf
     );
   }
 
   /** Return whether `item` is the final record without computing its rank. */
   isLast(item: T): boolean {
-    const location = this.resolveLocation(item);
-    if (
-      location === undefined ||
-      location.offsetInLeaf !== location.leaf.items.length - 1
-    ) {
+    const leaf = this.leafOf(item);
+    if (leaf === null || leaf.items[leaf.items.length - 1] !== item) {
       return false;
     }
     if (this.maintainOrder) {
-      return this.leafOrder.isLast(location.leaf);
+      return this.leafOrder.isLast(leaf);
     }
-    return this.findRightmostLeaf().leaf === location.leaf;
+    return this.findRightmostLeaf().leaf === leaf;
   }
 
   /**
@@ -252,18 +267,20 @@ export class IndexedSequence<T extends object> {
    * query heavily during concurrent replay.
    */
   effectIndexOf(item: T): number {
-    const location = this.resolveLocation(item);
-    if (!location) {
+    const leaf = this.leafOf(item);
+    if (leaf === null) {
       return -1;
     }
 
+    const offsetInLeaf = this.offsetInLeaf(leaf, item);
+    const weights = leaf.weights;
     let effectIndex = 0;
-    for (let offset = 0; offset < location.offsetInLeaf; offset++) {
+    for (let offset = 0; offset < offsetInLeaf; offset++) {
       this.structuralOperationCount++;
-      effectIndex += location.leaf.effectWeights[offset] ?? 0;
+      effectIndex += weights[offset * WEIGHT_STRIDE + EFFECT_WEIGHT] ?? 0;
     }
 
-    let current: IndexedNode<T> = location.leaf;
+    let current: IndexedNode<T> = leaf;
     while (current.parent) {
       this.structuralOperationCount++;
       const parent: InternalNode<T> = current.parent;
@@ -285,18 +302,20 @@ export class IndexedSequence<T extends object> {
    * so it is O(log n) and does not materialize sequence positions.
    */
   prepareIndexAfter(item: T): number {
-    const location = this.resolveLocation(item);
-    if (!location) {
+    const leaf = this.leafOf(item);
+    if (leaf === null) {
       return -1;
     }
 
+    const offsetInLeaf = this.offsetInLeaf(leaf, item);
+    const weights = leaf.weights;
     let prepareIndex = 0;
-    for (let offset = 0; offset <= location.offsetInLeaf; offset++) {
+    for (let offset = 0; offset <= offsetInLeaf; offset++) {
       this.structuralOperationCount++;
-      prepareIndex += location.leaf.prepareWeights[offset] ?? 0;
+      prepareIndex += weights[offset * WEIGHT_STRIDE + PREPARE_WEIGHT] ?? 0;
     }
 
-    let current: IndexedNode<T> = location.leaf;
+    let current: IndexedNode<T> = leaf;
     while (current.parent) {
       this.structuralOperationCount++;
       const parent: InternalNode<T> = current.parent;
@@ -314,7 +333,10 @@ export class IndexedSequence<T extends object> {
       throw new Error("Cannot clear IndexedSequence during a batch update");
     }
     this.root = null;
-    this.locationsByItem = new WeakMap<T, ItemLocation<T>>();
+    // Retire the old tree: its items stop resolving here and may join
+    // another sequence.
+    this.tree.live = false;
+    this.tree = { live: true };
     if (this.maintainOrder) {
       this.leafOrder.resetFromItems([]);
     }
@@ -338,12 +360,14 @@ export class IndexedSequence<T extends object> {
     }
 
     if (!this.root) {
-      const leaf = createLeaf<T>();
+      // Fill the leaf before it becomes the root, so that a rejected item
+      // leaves the sequence empty. One item cannot split it.
+      const leaf = createLeaf<T>(this.tree);
+      this.insertIntoLeaf(leaf, 0, item);
       if (this.maintainOrder) {
         this.leafOrder.resetFromItems([leaf]);
       }
       this.root = leaf;
-      this.insertIntoLeaf(leaf, 0, item);
       return;
     }
 
@@ -374,12 +398,13 @@ export class IndexedSequence<T extends object> {
 
     this.structuralOperationCount++;
     if (!this.root) {
-      const leaf = createLeaf<T>();
+      // At most LEAF_CAPACITY items cannot split the leaf; see `insert`.
+      const leaf = createLeaf<T>(this.tree);
+      this.insertManyIntoLeaf(leaf, 0, items);
       if (this.maintainOrder) {
         this.leafOrder.resetFromItems([leaf]);
       }
       this.root = leaf;
-      this.insertManyIntoLeaf(leaf, 0, items);
       return;
     }
 
@@ -392,13 +417,13 @@ export class IndexedSequence<T extends object> {
 
   /** Insert one item immediately after a known object without a rank lookup. */
   insertAfter(anchor: T, item: T): boolean {
-    const location = this.resolveLocation(anchor);
-    if (location === undefined || this.resolveLocation(item) !== undefined) {
+    const leaf = this.leafOf(anchor);
+    if (leaf === null || this.leafOf(item) !== null) {
       return false;
     }
 
     this.structuralOperationCount++;
-    this.insertIntoLeaf(location.leaf, location.offsetInLeaf + 1, item);
+    this.insertIntoLeaf(leaf, this.offsetInLeaf(leaf, anchor) + 1, item);
     return true;
   }
 
@@ -418,17 +443,16 @@ export class IndexedSequence<T extends object> {
 
   updateItem(item: T): void {
     this.structuralOperationCount++;
-    const location = this.resolveLocation(item);
-    if (!location) {
+    const leaf = this.leafOf(item);
+    if (leaf === null) {
       return;
     }
 
-    const leaf = location.leaf;
-    const offset = location.offsetInLeaf;
-
-    const oldPrepare = leaf.prepareWeights[offset] ?? 0;
-    const oldEffect = leaf.effectWeights[offset] ?? 0;
-    const oldAnchor = leaf.anchorWeights[offset] ?? 0;
+    const weights = leaf.weights;
+    const base = this.offsetInLeaf(leaf, item) * WEIGHT_STRIDE;
+    const oldPrepare = weights[base + PREPARE_WEIGHT] ?? 0;
+    const oldEffect = weights[base + EFFECT_WEIGHT] ?? 0;
+    const oldAnchor = weights[base + ANCHOR_WEIGHT] ?? 0;
     const newPrepare = this.prepareWeight(item);
     const newEffect = this.effectWeight(item);
     const newAnchor = this.anchorWeight(item);
@@ -439,9 +463,9 @@ export class IndexedSequence<T extends object> {
       return;
     }
 
-    leaf.prepareWeights[offset] = newPrepare;
-    leaf.effectWeights[offset] = newEffect;
-    leaf.anchorWeights[offset] = newAnchor;
+    weights[base + PREPARE_WEIGHT] = newPrepare;
+    weights[base + EFFECT_WEIGHT] = newEffect;
+    weights[base + ANCHOR_WEIGHT] = newAnchor;
     this.propagateDelta(leaf, 0, prepareDelta, effectDelta, anchorDelta);
   }
 
@@ -474,16 +498,16 @@ export class IndexedSequence<T extends object> {
     let next = this.weightUpdateLevelB;
     for (const item of items) {
       this.structuralOperationCount++;
-      const location = this.resolveLocation(item);
-      if (location === undefined) {
+      const leaf = this.leafOf(item);
+      if (leaf === null) {
         continue;
       }
 
-      const leaf = location.leaf;
-      const offset = location.offsetInLeaf;
-      const oldPrepare = leaf.prepareWeights[offset] ?? 0;
-      const oldEffect = leaf.effectWeights[offset] ?? 0;
-      const oldAnchor = leaf.anchorWeights[offset] ?? 0;
+      const weights = leaf.weights;
+      const base = this.offsetInLeaf(leaf, item) * WEIGHT_STRIDE;
+      const oldPrepare = weights[base + PREPARE_WEIGHT] ?? 0;
+      const oldEffect = weights[base + EFFECT_WEIGHT] ?? 0;
+      const oldAnchor = weights[base + ANCHOR_WEIGHT] ?? 0;
       const newPrepare = this.prepareWeight(item);
       const newEffect = this.effectWeight(item);
       const newAnchor = this.anchorWeight(item);
@@ -494,9 +518,9 @@ export class IndexedSequence<T extends object> {
         continue;
       }
 
-      leaf.prepareWeights[offset] = newPrepare;
-      leaf.effectWeights[offset] = newEffect;
-      leaf.anchorWeights[offset] = newAnchor;
+      weights[base + PREPARE_WEIGHT] = newPrepare;
+      weights[base + EFFECT_WEIGHT] = newEffect;
+      weights[base + ANCHOR_WEIGHT] = newAnchor;
       addPendingNodeWeightDelta(
         current,
         leaf,
@@ -560,27 +584,25 @@ export class IndexedSequence<T extends object> {
    * is unavailable or the inserted object is already resident.
    *
    * The cached anchor weights are read before the new weights are evaluated,
-   * then each resident array is spliced once and one combined delta is walked
+   * then the leaf's slots are shifted once and one combined delta is walked
    * through the ancestors. This is the record-split counterpart to calling
    * {@link updateItem} followed by {@link insertManyAfter}, without paying for
    * two location lookups and two aggregate walks.
    */
   updateAndInsertAfter(anchor: T, inserted: T): boolean {
-    const location = this.resolveLocation(anchor);
-    if (
-      location === undefined ||
-      this.resolveLocation(inserted) !== undefined
-    ) {
+    const leaf = this.leafOf(anchor);
+    if (leaf === null || this.leafOf(inserted) !== null) {
       return false;
     }
+    this.assertDetached(inserted);
 
     this.structuralOperationCount++;
-    const leaf = location.leaf;
-    const offset = location.offsetInLeaf;
-    const insertOffset = offset + 1;
-    const oldPrepare = leaf.prepareWeights[offset] ?? 0;
-    const oldEffect = leaf.effectWeights[offset] ?? 0;
-    const oldAnchor = leaf.anchorWeights[offset] ?? 0;
+    const offset = this.offsetInLeaf(leaf, anchor);
+    const weights = leaf.weights;
+    const base = offset * WEIGHT_STRIDE;
+    const oldPrepare = weights[base + PREPARE_WEIGHT] ?? 0;
+    const oldEffect = weights[base + EFFECT_WEIGHT] ?? 0;
+    const oldAnchor = weights[base + ANCHOR_WEIGHT] ?? 0;
     const anchorPrepare = this.prepareWeight(anchor);
     const anchorEffect = this.effectWeight(anchor);
     const anchorAnchor = this.anchorWeight(anchor);
@@ -588,24 +610,17 @@ export class IndexedSequence<T extends object> {
     const insertedEffect = this.effectWeight(inserted);
     const insertedAnchor = this.anchorWeight(inserted);
 
-    leaf.items.splice(insertOffset, 0, inserted);
-    leaf.prepareWeights.splice(offset, 1, anchorPrepare, insertedPrepare);
-    leaf.effectWeights.splice(offset, 1, anchorEffect, insertedEffect);
-    leaf.anchorWeights.splice(offset, 1, anchorAnchor, insertedAnchor);
-
-    for (let index = insertOffset; index < leaf.items.length; index++) {
-      const item = leaf.items[index];
-      if (item === undefined) {
-        continue;
-      }
-      const itemLocation = this.locationsByItem.get(item);
-      if (itemLocation === undefined) {
-        this.locationsByItem.set(item, { leaf, offsetInLeaf: index });
-      } else {
-        itemLocation.leaf = leaf;
-        itemLocation.offsetInLeaf = index;
-      }
-    }
+    insertSlot(
+      leaf,
+      offset + 1,
+      inserted,
+      insertedPrepare,
+      insertedEffect,
+      insertedAnchor,
+    );
+    weights[base + PREPARE_WEIGHT] = anchorPrepare;
+    weights[base + EFFECT_WEIGHT] = anchorEffect;
+    weights[base + ANCHOR_WEIGHT] = anchorAnchor;
 
     this.propagateDelta(
       leaf,
@@ -933,26 +948,24 @@ export class IndexedSequence<T extends object> {
   private bulkLoad(items: ReadonlyArray<T>): void {
     const leaves: LeafNode<T>[] = [];
     for (let start = 0; start < items.length; start += LEAF_CAPACITY) {
-      const leaf = createLeaf<T>();
+      const leaf = createLeaf<T>(this.tree);
       const end = Math.min(start + LEAF_CAPACITY, items.length);
       for (let index = start; index < end; index++) {
         const item = items[index];
         if (!item) {
           continue;
         }
+        this.assertDetached(item);
         const prepare = this.prepareWeight(item);
         const effect = this.effectWeight(item);
         const anchor = this.anchorWeight(item);
-        const offset = leaf.items.length;
+        item.sequenceLeaf = leaf;
         leaf.items.push(item);
-        leaf.prepareWeights.push(prepare);
-        leaf.effectWeights.push(effect);
-        leaf.anchorWeights.push(anchor);
+        leaf.weights.push(prepare, effect, anchor);
         leaf.size++;
         leaf.prepareSum += prepare;
         leaf.effectSum += effect;
         leaf.anchorSum += anchor;
-        this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
       }
       leaves.push(leaf);
     }
@@ -963,23 +976,33 @@ export class IndexedSequence<T extends object> {
     this.root = this.buildBalancedTree(leaves);
   }
 
-  private resolveLocation(item: T): ItemLocation<T> | undefined {
-    const location = this.locationsByItem.get(item);
-    if (!location) {
-      return undefined;
-    }
-    if (location.leaf.items[location.offsetInLeaf] === item) {
-      return location;
-    }
+  /** The leaf of this sequence that holds `item`, or `null`. */
+  private leafOf(item: T): LeafNode<T> | null {
+    const leaf = item.sequenceLeaf;
+    return leaf !== null && leaf.tree === this.tree ? leaf : null;
+  }
 
-    // Defensive fallback: cached offsets should be exact, but recovering here
-    // keeps every object-anchored operation resilient to a maintenance bug.
-    const offset = location.leaf.items.indexOf(item);
-    if (offset === -1) {
-      return undefined;
+  /**
+   * Offset of a resident item in its leaf. A leaf holds at most
+   * {@link LEAF_CAPACITY} items between operations, so scanning it is cheaper
+   * than updating the cached offset of every item an insert shifts.
+   */
+  private offsetInLeaf(leaf: LeafNode<T>, item: T): number {
+    const items = leaf.items;
+    for (let offset = 0; offset < items.length; offset++) {
+      if (items[offset] === item) {
+        return offset;
+      }
     }
-    location.offsetInLeaf = offset;
-    return location;
+    throw new Error("IndexedSequence item is missing from its leaf");
+  }
+
+  /** Reject an item that a live sequence, this one or another, still holds. */
+  private assertDetached(item: T): void {
+    const leaf = item.sequenceLeaf;
+    if (leaf !== null && leaf.tree.live) {
+      throw new Error("IndexedSequence item already belongs to a sequence");
+    }
   }
 
   private insertManyAtAnchor(
@@ -987,28 +1010,21 @@ export class IndexedSequence<T extends object> {
     items: ReadonlyArray<T>,
     after: boolean,
   ): boolean {
-    const location = this.resolveLocation(anchor);
-    if (!location) {
+    const leaf = this.leafOf(anchor);
+    if (leaf === null) {
       return false;
     }
     if (items.length === 0) {
       return true;
     }
+    const offset = this.offsetInLeaf(leaf, anchor) + (after ? 1 : 0);
     if (items.length > LEAF_CAPACITY) {
-      const position =
-        this.positionOfNode(location.leaf) +
-        location.offsetInLeaf +
-        (after ? 1 : 0);
-      this.insertMany(position, items);
+      this.insertMany(this.positionOfNode(leaf) + offset, items);
       return true;
     }
 
     this.structuralOperationCount++;
-    this.insertManyIntoLeaf(
-      location.leaf,
-      location.offsetInLeaf + (after ? 1 : 0),
-      items,
-    );
+    this.insertManyIntoLeaf(leaf, offset, items);
     return true;
   }
 
@@ -1034,27 +1050,12 @@ export class IndexedSequence<T extends object> {
   }
 
   private insertIntoLeaf(leaf: LeafNode<T>, offset: number, item: T): void {
+    this.assertDetached(item);
     const prepare = this.prepareWeight(item);
     const effect = this.effectWeight(item);
     const anchor = this.anchorWeight(item);
 
-    leaf.items.splice(offset, 0, item);
-    leaf.prepareWeights.splice(offset, 0, prepare);
-    leaf.effectWeights.splice(offset, 0, effect);
-    leaf.anchorWeights.splice(offset, 0, anchor);
-
-    this.locationsByItem.set(item, { leaf, offsetInLeaf: offset });
-    for (let index = offset + 1; index < leaf.items.length; index++) {
-      const sibling = leaf.items[index];
-      if (!sibling) {
-        continue;
-      }
-      const location = this.locationsByItem.get(sibling);
-      if (location) {
-        location.offsetInLeaf = index;
-      }
-    }
-
+    insertSlot(leaf, offset, item, prepare, effect, anchor);
     this.propagateDelta(leaf, 1, prepare, effect, anchor);
 
     if (leaf.items.length > LEAF_CAPACITY) {
@@ -1067,30 +1068,26 @@ export class IndexedSequence<T extends object> {
     offset: number,
     items: ReadonlyArray<T>,
   ): void {
-    const prepareWeights = items.map(this.prepareWeight);
-    const effectWeights = items.map(this.effectWeight);
-    const anchorWeights = items.map(this.anchorWeight);
-    const prepareSum = sumWeights(prepareWeights);
-    const effectSum = sumWeights(effectWeights);
-    const anchorSum = sumWeights(anchorWeights);
-
-    leaf.items.splice(offset, 0, ...items);
-    leaf.prepareWeights.splice(offset, 0, ...prepareWeights);
-    leaf.effectWeights.splice(offset, 0, ...effectWeights);
-    leaf.anchorWeights.splice(offset, 0, ...anchorWeights);
-
-    for (let index = offset; index < leaf.items.length; index++) {
-      const item = leaf.items[index];
-      if (item !== undefined) {
-        const location = this.locationsByItem.get(item);
-        if (location === undefined) {
-          this.locationsByItem.set(item, { leaf, offsetInLeaf: index });
-        } else {
-          location.leaf = leaf;
-          location.offsetInLeaf = index;
-        }
-      }
+    for (const item of items) {
+      this.assertDetached(item);
     }
+    const weights: number[] = [];
+    let prepareSum = 0;
+    let effectSum = 0;
+    let anchorSum = 0;
+    for (const item of items) {
+      const prepare = this.prepareWeight(item);
+      const effect = this.effectWeight(item);
+      const anchor = this.anchorWeight(item);
+      weights.push(prepare, effect, anchor);
+      prepareSum += prepare;
+      effectSum += effect;
+      anchorSum += anchor;
+      item.sequenceLeaf = leaf;
+    }
+
+    insertRange(leaf.items, offset, items);
+    insertRange(leaf.weights, offset * WEIGHT_STRIDE, weights);
     this.propagateDelta(leaf, items.length, prepareSum, effectSum, anchorSum);
 
     if (leaf.items.length > LEAF_CAPACITY) {
@@ -1101,41 +1098,25 @@ export class IndexedSequence<T extends object> {
   private splitLeaf(leaf: LeafNode<T>): void {
     this.structuralOperationCount++;
     const midpoint = Math.ceil(leaf.items.length / 2);
-    const sibling = createLeaf<T>();
+    const sibling = createLeaf<T>(
+      this.tree,
+      leaf.items.slice(midpoint),
+      leaf.weights.slice(midpoint * WEIGHT_STRIDE),
+    );
+    leaf.items.length = midpoint;
+    leaf.weights.length = midpoint * WEIGHT_STRIDE;
 
-    const movedItems = leaf.items.splice(midpoint);
-    const movedPrepareWeights = leaf.prepareWeights.splice(midpoint);
-    const movedEffectWeights = leaf.effectWeights.splice(midpoint);
-    const movedAnchorWeights = leaf.anchorWeights.splice(midpoint);
-
-    sibling.items.push(...movedItems);
-    sibling.prepareWeights.push(...movedPrepareWeights);
-    sibling.effectWeights.push(...movedEffectWeights);
-    sibling.anchorWeights.push(...movedAnchorWeights);
-
+    const movedItems = sibling.items;
+    const movedWeights = sibling.weights;
     let movedPrepareSum = 0;
     let movedEffectSum = 0;
     let movedAnchorSum = 0;
     for (let index = 0; index < movedItems.length; index++) {
-      const item = movedItems[index];
-      const prepare = movedPrepareWeights[index] ?? 0;
-      const effect = movedEffectWeights[index] ?? 0;
-      const anchor = movedAnchorWeights[index] ?? 0;
-      movedPrepareSum += prepare;
-      movedEffectSum += effect;
-      movedAnchorSum += anchor;
-      if (item) {
-        const location = this.locationsByItem.get(item);
-        if (location === undefined) {
-          this.locationsByItem.set(item, {
-            leaf: sibling,
-            offsetInLeaf: index,
-          });
-        } else {
-          location.leaf = sibling;
-          location.offsetInLeaf = index;
-        }
-      }
+      const base = index * WEIGHT_STRIDE;
+      movedPrepareSum += movedWeights[base + PREPARE_WEIGHT] ?? 0;
+      movedEffectSum += movedWeights[base + EFFECT_WEIGHT] ?? 0;
+      movedAnchorSum += movedWeights[base + ANCHOR_WEIGHT] ?? 0;
+      movedItems[index]!.sequenceLeaf = sibling;
     }
 
     leaf.size = leaf.items.length;
@@ -1143,7 +1124,7 @@ export class IndexedSequence<T extends object> {
     leaf.effectSum -= movedEffectSum;
     leaf.anchorSum -= movedAnchorSum;
 
-    sibling.size = sibling.items.length;
+    sibling.size = movedItems.length;
     sibling.prepareSum = movedPrepareSum;
     sibling.effectSum = movedEffectSum;
     sibling.anchorSum = movedAnchorSum;
@@ -1413,11 +1394,16 @@ export class IndexedSequence<T extends object> {
     offset: number,
     kind: WeightKind,
   ): number {
-    return kind === "prepare"
-      ? (node.prepareWeights[offset] ?? 0)
-      : kind === "effect"
-        ? (node.effectWeights[offset] ?? 0)
-        : (node.anchorWeights[offset] ?? 0);
+    return (
+      node.weights[
+        offset * WEIGHT_STRIDE +
+          (kind === "prepare"
+            ? PREPARE_WEIGHT
+            : kind === "effect"
+              ? EFFECT_WEIGHT
+              : ANCHOR_WEIGHT)
+      ] ?? 0
+    );
   }
 
   private propagateDelta(
@@ -1449,6 +1435,7 @@ export class IndexedSequence<T extends object> {
       let prepareSum = 0;
       let effectSum = 0;
       let anchorSum = 0;
+      const weights = node.weights;
       for (let index = 0; index < node.items.length; index++) {
         const item = node.items[index];
         if (!item) {
@@ -1457,16 +1444,15 @@ export class IndexedSequence<T extends object> {
         const prepare = this.prepareWeight(item);
         const effect = this.effectWeight(item);
         const anchor = this.anchorWeight(item);
-        node.prepareWeights[index] = prepare;
-        node.effectWeights[index] = effect;
-        node.anchorWeights[index] = anchor;
+        const base = index * WEIGHT_STRIDE;
+        weights[base + PREPARE_WEIGHT] = prepare;
+        weights[base + EFFECT_WEIGHT] = effect;
+        weights[base + ANCHOR_WEIGHT] = anchor;
         prepareSum += prepare;
         effectSum += effect;
         anchorSum += anchor;
       }
-      node.prepareWeights.length = node.items.length;
-      node.effectWeights.length = node.items.length;
-      node.anchorWeights.length = node.items.length;
+      weights.length = node.items.length * WEIGHT_STRIDE;
       node.size = node.items.length;
       node.prepareSum = prepareSum;
       node.effectSum = effectSum;
@@ -1526,5 +1512,69 @@ const addPendingNodeWeightDelta = <T extends object>(
   node.pendingAnchorDelta += anchor;
 };
 
-const sumWeights = (weights: ReadonlyArray<number>): number =>
-  weights.reduce((sum, weight) => sum + weight, 0);
+/**
+ * Insert one item and its weights at `offset`, shifting the later slots of
+ * both leaf arrays right in place. Each array first grows at its end, in
+ * index order, so it stays packed.
+ */
+const insertSlot = <T extends IndexedSequenceItem<T>>(
+  leaf: LeafNode<T>,
+  offset: number,
+  item: T,
+  prepare: number,
+  effect: number,
+  anchor: number,
+): void => {
+  const items = leaf.items;
+  const weights = leaf.weights;
+  const length = items.length;
+  item.sequenceLeaf = leaf;
+  if (offset === length) {
+    items.push(item);
+    weights.push(prepare, effect, anchor);
+    return;
+  }
+
+  items.push(items[length - 1]!);
+  for (let slot = length - 1; slot > offset; slot--) {
+    items[slot] = items[slot - 1]!;
+  }
+  items[offset] = item;
+
+  const base = offset * WEIGHT_STRIDE;
+  const end = length * WEIGHT_STRIDE;
+  weights.push(weights[end - 3]!, weights[end - 2]!, weights[end - 1]!);
+  for (let index = end - 1; index >= base + WEIGHT_STRIDE; index--) {
+    weights[index] = weights[index - WEIGHT_STRIDE]!;
+  }
+  weights[base + PREPARE_WEIGHT] = prepare;
+  weights[base + EFFECT_WEIGHT] = effect;
+  weights[base + ANCHOR_WEIGHT] = anchor;
+};
+
+/**
+ * Insert `inserted` at `start`, shifting later values right in place. The
+ * array grows at its end in index order, so it stays packed.
+ */
+const insertRange = <V>(
+  values: V[],
+  start: number,
+  inserted: ReadonlyArray<V>,
+): void => {
+  const length = values.length;
+  const count = inserted.length;
+  for (let index = length; index < length + count; index++) {
+    values.push(
+      index - count >= start
+        ? values[index - count]!
+        : inserted[index - start]!,
+    );
+  }
+  for (let index = length - 1; index >= start + count; index--) {
+    values[index] = values[index - count]!;
+  }
+  const filledEnd = Math.min(start + count, length);
+  for (let index = start; index < filledEnd; index++) {
+    values[index] = inserted[index - start]!;
+  }
+};

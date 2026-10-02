@@ -139,16 +139,18 @@ const leaf = (
 
 const EMPTY_LEAF = leaf("", bmpUtf16Metadata(""));
 
-const branch = (
-  children: ReadonlyArray<RopeNode>,
-  collapseSingle: boolean = true,
-): RopeNode => {
-  if (children.length === 0) {
-    return EMPTY_LEAF;
-  }
-  if (collapseSingle && children.length === 1) {
-    return children[0]!;
-  }
+const DELETED_WHOLE: DeleteResult = Object.freeze({
+  node: null,
+  hasUnderfilledLeaf: false,
+});
+
+/**
+ * Freeze a non-empty child array into a branch, computing `cumulativeEnds`
+ * and the UTF-16 metadata in one pass. The branch keeps `children` itself
+ * instead of copying it, so callers pass a freshly built array that nothing
+ * else references.
+ */
+const branch = (children: RopeNode[]): BranchNode => {
   counters.nodeAllocations++;
   let length = 0;
   let nodeCount = 1;
@@ -156,8 +158,11 @@ const branch = (
   let hasSurrogatePairs = false;
   let firstCodeUnit: number | undefined;
   let previousLastCodeUnit: number | undefined;
-  const cumulativeEnds = children.map((child) => {
+  const cumulativeEnds = new Array<number>(children.length);
+  for (let index = 0; index < children.length; index++) {
+    const child = children[index]!;
     length += child.length;
+    cumulativeEnds[index] = length;
     nodeCount += child.nodeCount;
     hasSurrogateCodeUnits ||= child.hasSurrogateCodeUnits;
     hasSurrogatePairs ||=
@@ -172,11 +177,10 @@ const branch = (
     if (child.lastCodeUnit !== undefined) {
       previousLastCodeUnit = child.lastCodeUnit;
     }
-    return length;
-  });
+  }
   return Object.freeze({
     kind: "branch" as const,
-    children: Object.freeze([...children]),
+    children: Object.freeze(children),
     cumulativeEnds: Object.freeze(cumulativeEnds),
     length,
     nodeCount,
@@ -541,12 +545,54 @@ const insertIntoNode = (
     index - childStart,
     text,
   );
-  const children = [
-    ...node.children.slice(0, childIndex),
-    ...replacements,
-    ...node.children.slice(childIndex + 1),
-  ];
-  return partitionLevel(children).map((group) => branch(group, false));
+  const children = spliceChildren(
+    node.children,
+    childIndex,
+    childIndex + 1,
+    replacements,
+  );
+  return children.length <= UTF16_ROPE_BRANCH_FACTOR
+    ? [branch(children)]
+    : partitionLevel(children).map((group) => branch(group));
+};
+
+/**
+ * Copy `children` with `[start, end)` replaced by `replacements`.
+ *
+ * Branch child arrays are frozen. In V8 (Node 22 and 24), copying a frozen
+ * array with `slice()` is over 40 times slower than with `Array.from`, and
+ * reading its elements in a loop is about 5 times slower than reading a plain
+ * array's. A same-size replacement, the case for every edit that neither
+ * splits nor removes a child, therefore copies with `Array.from` and stores
+ * the replacements. Other edits fill a preallocated array of the exact size.
+ */
+const spliceChildren = (
+  children: ReadonlyArray<RopeNode>,
+  start: number,
+  end: number,
+  replacements: ReadonlyArray<RopeNode>,
+): RopeNode[] => {
+  if (replacements.length === end - start) {
+    const spliced = Array.from(children);
+    for (let offset = 0; offset < replacements.length; offset++) {
+      spliced[start + offset] = replacements[offset]!;
+    }
+    return spliced;
+  }
+  const spliced = new Array<RopeNode>(
+    children.length - (end - start) + replacements.length,
+  );
+  let target = 0;
+  for (let index = 0; index < start; index++) {
+    spliced[target++] = children[index]!;
+  }
+  for (const replacement of replacements) {
+    spliced[target++] = replacement;
+  }
+  for (let index = end; index < children.length; index++) {
+    spliced[target++] = children[index]!;
+  }
+  return spliced;
 };
 
 const deleteFromNode = (
@@ -556,7 +602,7 @@ const deleteFromNode = (
 ): DeleteResult => {
   counters.nodeVisits++;
   if (start <= 0 && end >= node.length) {
-    return { node: null, hasUnderfilledLeaf: false };
+    return DELETED_WHOLE;
   }
   if (node.kind === "leaf") {
     const remaining = `${node.text.slice(0, Math.max(0, start))}${node.text.slice(Math.min(node.length, end))}`;
@@ -575,30 +621,46 @@ const deleteFromNode = (
     };
   }
 
-  const children: RopeNode[] = [];
-  let hasUnderfilledLeaf = false;
-  let childStart = 0;
-  for (const child of node.children) {
-    const childEnd = childStart + child.length;
-    if (end <= childStart || start >= childEnd) {
-      children.push(child);
-    } else if (!(start <= childStart && end >= childEnd)) {
-      const retained = deleteFromNode(
-        child,
-        Math.max(0, start - childStart),
-        Math.min(child.length, end - childStart),
-      );
-      hasUnderfilledLeaf ||= retained.hasUnderfilledLeaf;
-      if (retained.node !== null) {
-        children.push(retained.node);
-      }
-    }
-    childStart = childEnd;
-  }
+  // Only the children holding `start` and `end - 1` can keep part of their
+  // text; every child between them is deleted whole.
+  const first = lowerBound(node.cumulativeEnds, start + 1);
+  const last = lowerBound(node.cumulativeEnds, end);
+  const head = deleteFromChild(node, first, start, end);
+  const tail =
+    last === first ? DELETED_WHOLE : deleteFromChild(node, last, start, end);
+  const kept =
+    head.node === null
+      ? tail.node === null
+        ? []
+        : [tail.node]
+      : tail.node === null
+        ? [head.node]
+        : [head.node, tail.node];
+  const children = spliceChildren(node.children, first, last + 1, kept);
   return {
-    node: children.length === 0 ? null : branch(children, false),
-    hasUnderfilledLeaf,
+    node: children.length === 0 ? null : branch(children),
+    hasUnderfilledLeaf: head.hasUnderfilledLeaf || tail.hasUnderfilledLeaf,
   };
+};
+
+/** Delete `[start, end)`, in parent offsets, from one child of `parent`. */
+const deleteFromChild = (
+  parent: BranchNode,
+  childIndex: number,
+  start: number,
+  end: number,
+): DeleteResult => {
+  const child = parent.children[childIndex]!;
+  const childStart =
+    childIndex === 0 ? 0 : parent.cumulativeEnds[childIndex - 1]!;
+  if (start <= childStart && end >= childStart + child.length) {
+    return DELETED_WHOLE;
+  }
+  return deleteFromNode(
+    child,
+    Math.max(0, start - childStart),
+    Math.min(child.length, end - childStart),
+  );
 };
 
 const rebalanceLeafContaining = (root: RopeNode, index: number): RopeNode => {
@@ -644,9 +706,7 @@ const locateLeaf = (
   return { leaf: node, start };
 };
 
-const partitionLevel = (
-  nodes: ReadonlyArray<RopeNode>,
-): ReadonlyArray<ReadonlyArray<RopeNode>> => {
+const partitionLevel = (nodes: ReadonlyArray<RopeNode>): RopeNode[][] => {
   const groupCount = Math.max(
     1,
     Math.ceil(nodes.length / UTF16_ROPE_BRANCH_FACTOR),
@@ -664,9 +724,9 @@ const partitionLevel = (
 };
 
 const buildFromSameHeightNodes = (nodes: ReadonlyArray<RopeNode>): RopeNode => {
-  let level = [...nodes];
+  let level = nodes;
   while (level.length > 1) {
-    level = partitionLevel(level).map((group) => branch(group, false));
+    level = partitionLevel(level).map((group) => branch(group));
   }
   return collapseRoot(level[0] ?? EMPTY_LEAF);
 };

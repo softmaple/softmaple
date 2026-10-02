@@ -244,7 +244,7 @@ describe("PersistentUtf16Rope", () => {
     );
   });
 
-  // The property above stays within one or two leaves. These start from
+  // The property above never grows a rope past one leaf. These start from
   // documents with two branch levels and apply edits large enough to split,
   // merge and delete whole leaves and branches.
   it("matches JavaScript strings and UTF-16 metadata when edits span branches", () => {

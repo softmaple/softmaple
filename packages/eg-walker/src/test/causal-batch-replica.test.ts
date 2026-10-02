@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { OPERATION_TYPE } from "../constants/operation-types";
 import {
   createCausalEventBatchBuilder,
-  inspectCausalEventBatch,
   type CausalEventBatch,
 } from "../core/causal-event-batch";
 import { MAX_RETAINED_CHECKPOINTS } from "../core/internals/critical-checkpoint-store";
@@ -247,7 +246,7 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
         insertEvent("chain:2", ["chain:1"], 2, "c"),
       ],
     },
-  ])("stores the events of $name without copying them", ({ setup, events }) => {
+  ])("stores $name without per-event graph ingestion", ({ setup, events }) => {
     const replica = new EgWalkerReplica("causal-adopt");
     const reference = new EgWalkerReplica("detailed-adopt");
     for (const event of setup) {
@@ -255,7 +254,6 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
       reference.applyRemoteEvent(event);
     }
     const batch = toCausalBatch(events);
-    const built = inspectCausalEventBatch(batch);
     const copied = vi.spyOn(EventGraph.prototype, "addEvent");
     const adopted = vi.spyOn(EventGraph.prototype, "addOwnedEvent");
 
@@ -263,16 +261,77 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
       replica.applyCausalBatch(batch);
 
       expect(copied).not.toHaveBeenCalled();
-      expect(adopted).toHaveBeenCalledTimes(built.length);
-      built.forEach((event, index) => {
-        expect(adopted.mock.calls[index]?.[0]).toBe(event);
-      });
+      expect(adopted).not.toHaveBeenCalled();
     } finally {
       copied.mockRestore();
       adopted.mockRestore();
     }
     reference.applyRemoteEvents(events);
     expect(replica.getText()).toBe(reference.getText());
+  });
+
+  it("retries adopted columns on another replica after operation validation fails", () => {
+    const batch = toCausalBatch([
+      insertEvent("custom-root", [], 1, "A", 0.5),
+      insertEvent("other:9", [], 1, "B", 1.5),
+    ]);
+    const empty = new EgWalkerReplica("empty");
+    const before = observableState(empty);
+    expect(() => empty.applyCausalBatch(batch)).toThrow();
+    expect(observableState(empty)).toEqual(before);
+    // A different initial document makes both concurrent operations valid.
+    const target = new EgWalkerReplica("target", "x");
+    const reference = new EgWalkerReplica("reference", "x");
+    target.applyCausalBatch(batch);
+    reference.applyRemoteEvents([
+      insertEvent("custom-root", [], 1, "A", 0.5),
+      insertEvent("other:9", [], 1, "B", 1.5),
+    ]);
+    expect(canonicalGraph(target)).toEqual(canonicalGraph(reference));
+    expect(target.getText()).toBe(reference.getText());
+    empty.applyCausalBatch(toCausalBatch([insertEvent("new:0", [], 0, "z")]));
+    empty.insert(1, "!");
+    expect(empty.getText()).toBe("z!");
+  });
+
+  it.each([
+    "tail",
+    "packed",
+  ])("remaps local parents and agents onto a %s prefix", (prefix) => {
+    const root = insertEvent("z:9", [], 0, "x");
+    const replica = new EgWalkerReplica("mixed");
+    const reference = new EgWalkerReplica("reference");
+    if (prefix === "tail") replica.applyRemoteEvent(root);
+    else replica.applyCausalBatch(toCausalBatch([root]));
+    reference.applyRemoteEvent(root);
+    const events = [
+      insertEvent("a:2", ["z:9"], 1, "a", 0.5),
+      insertEvent("z:10", ["z:9"], 1, "b", 1.5),
+      insertEvent("custom", ["a:2", "z:10"], 3, "!", 2.5),
+    ];
+    replica.applyCausalBatch(toCausalBatch(events));
+    reference.applyRemoteEvents(events);
+    replica.insert(0, "@");
+    reference.applyRemoteEvents(
+      replica
+        .exportEventGraph()
+        .filter((event) => event.id.startsWith("mixed:")),
+    );
+    expect(replica.getText()).toBe(reference.getText());
+    expect(canonicalGraph(replica)).toEqual(canonicalGraph(reference));
+  });
+
+  it("widens timestamps when extending an adopted linear chain", () => {
+    const replica = new EgWalkerReplica("fractions");
+    const events = [
+      insertEvent("a:0", [], 0, "a", 0),
+      insertEvent("a:1", ["a:0"], 1, "b", 0.5),
+      insertEvent("a:2", ["a:1"], 2, "c", -1.5),
+    ];
+    for (const event of events)
+      replica.applyCausalBatch(toCausalBatch([event]));
+    expect(replica.exportEventGraph()).toEqual(events);
+    expect(replica.getText()).toBe("abc");
   });
 
   it("consumes an empty batch exactly once", () => {

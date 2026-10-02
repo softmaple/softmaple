@@ -21,7 +21,9 @@ describe("CausalEventBatchBuilder", () => {
     expect(returned).toBe(builder);
     expect(builder.eventCount).toBe(2);
     expect(batch).toEqual({ eventCount: 2 });
-    expect(inspectCausalEventBatch(batch)).toEqual([
+    expect(
+      [0, 1].map((offset) => inspectCausalEventBatch(batch).eventAt(offset)),
+    ).toEqual([
       {
         id: "alice:0",
         parentVersion: new Set(),
@@ -37,7 +39,7 @@ describe("CausalEventBatchBuilder", () => {
     ]);
   });
 
-  it("copies parent iterables and retains the final event objects", () => {
+  it("copies parent iterables and retains the owned columns", () => {
     const parents = new Set(["alice:0"]);
     const builder = createCausalEventBatchBuilder(4);
     builder.appendInsert("alice:1", parents, 1, "B", 1);
@@ -49,9 +51,9 @@ describe("CausalEventBatchBuilder", () => {
     const secondInspection = inspectCausalEventBatch(batch);
 
     expect(firstInspection).toBe(secondInspection);
-    expect(firstInspection[0]).toBe(secondInspection[0]);
-    expect(firstInspection[0]?.operation).toBe(secondInspection[0]?.operation);
-    expect(firstInspection[0]?.parentVersion).toEqual(new Set(["alice:0"]));
+    expect(firstInspection.eventAt(0).parentVersion).toEqual(
+      new Set(["alice:0"]),
+    );
   });
 
   it.each([
@@ -111,8 +113,70 @@ describe("CausalEventBatchBuilder", () => {
       .appendInsert("a:1", ["a:0"], 1, "b", 1);
 
     expect(empty.eventCount).toBe(0);
-    expect(inspectCausalEventBatch(empty)).toEqual([]);
-    expect(inspectCausalEventBatch(growing.finish())).toHaveLength(2);
+    expect(inspectCausalEventBatch(empty).count).toBe(0);
+    expect(inspectCausalEventBatch(growing.finish()).count).toBe(2);
+  });
+
+  it("preserves wide columns, custom IDs, and timestamps while growing", () => {
+    const builder = createCausalEventBatchBuilder(1);
+    builder.appendInsert(
+      "replica:with:colons:9007199254740991",
+      [],
+      2 ** 40,
+      "🙂",
+      -0.5,
+    );
+    builder.appendDelete(
+      "custom-id",
+      ["replica:with:colons:9007199254740991"],
+      Number.MAX_SAFE_INTEGER,
+      2 ** 40,
+      Number.MAX_VALUE,
+    );
+    const columns = inspectCausalEventBatch(builder.finish());
+    expect(columns.eventAt(0)).toEqual({
+      id: "replica:with:colons:9007199254740991",
+      parentVersion: new Set(),
+      operation: { type: "insert", index: 2 ** 40, text: "🙂" },
+      timestamp: -0.5,
+    });
+    expect(columns.eventAt(1)).toEqual({
+      id: "custom-id",
+      parentVersion: new Set(["replica:with:colons:9007199254740991"]),
+      operation: {
+        type: "delete",
+        index: Number.MAX_SAFE_INTEGER,
+        length: 2 ** 40,
+      },
+      timestamp: Number.MAX_VALUE,
+    });
+  });
+
+  it("discards all parents from a throwing iterable before the next append", () => {
+    const builder = createCausalEventBatchBuilder();
+    const parents = {
+      *[Symbol.iterator](): IterableIterator<string> {
+        yield "missing:0";
+        throw new Error("parent iteration failed");
+      },
+    };
+    expect(() => builder.appendInsert("a:0", parents, 0, "a", 0)).toThrow(
+      /parent iteration failed/,
+    );
+    builder.appendInsert("a:0", [], 0, "a", 0);
+    expect(
+      inspectCausalEventBatch(builder.finish()).eventAt(0).parentVersion,
+    ).toEqual(new Set());
+  });
+
+  it("deduplicates wide frontiers while preserving parent order", () => {
+    const parents = Array.from({ length: 40 }, (_, i) => `root:${i}`);
+    const batch = createCausalEventBatchBuilder()
+      .appendInsert("merge:0", [...parents, ...parents], 0, "", 0)
+      .finish();
+    expect([
+      ...inspectCausalEventBatch(batch).eventAt(0).parentVersion,
+    ]).toEqual(parents);
   });
 
   it("closes permanently after finish", () => {
@@ -169,7 +233,7 @@ describe("CausalEventBatchBuilder", () => {
       throw new Error("simulated transaction failure");
     };
     expect(failedApplyAttempt).toThrow(/simulated transaction failure/);
-    expect(inspectCausalEventBatch(batch)).toHaveLength(1);
+    expect(inspectCausalEventBatch(batch).count).toBe(1);
 
     consumeCausalEventBatch(batch);
 

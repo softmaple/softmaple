@@ -51,7 +51,10 @@ describe("EventGraph ownership boundary", () => {
       .appendInsert("root", [], 0, "A", 1)
       .appendInsert("child", ["root"], 1, "B", 2)
       .finish();
-    const events = inspectCausalEventBatch(batch);
+    const columns = inspectCausalEventBatch(batch);
+    const events = Array.from({ length: columns.count }, (_, offset) =>
+      columns.eventAt(offset),
+    );
     const graph = new EventGraph();
     for (const event of events) {
       graph.addEvent(event);

@@ -5,6 +5,8 @@ import type {
   GraphEvent,
   Version,
 } from "../../types";
+import type { CausalBatchColumns } from "./causal-batch-columns";
+import { CUSTOM_AGENT } from "./event-id-run-index";
 import { AgentTable } from "./agent-table";
 import { EventIdRunIndex } from "./event-id-run-index";
 import { GraphRuns } from "./graph-runs";
@@ -194,11 +196,11 @@ interface ColumnBounds {
  * stored values, only when an incoming value does not fit it.
  */
 class OperationColumnStore {
-  operationTypes = new Uint8Array(0);
+  operationTypes: Uint8Array = new Uint8Array(0);
   operationIndexes: PackedUnsignedIntegerColumn = new Uint32Array(0);
   operationLengths: PackedUnsignedIntegerColumn = new Uint32Array(0);
   timestamps: PackedIntegerColumn = new Int32Array(0);
-  insertStarts = new Uint32Array(0);
+  insertStarts: Uint32Array = new Uint32Array(0);
   count = 0;
   maximumIndex = 0;
   maximumLength = 0;
@@ -211,6 +213,32 @@ class OperationColumnStore {
     capacity: number,
   ) {
     this.reserve(capacity, EMPTY_BOUNDS);
+  }
+
+  /** Adopt sealed column views; later growth allocates new storage. */
+  static adopt(columns: PackedOperationColumns): OperationColumnStore {
+    const store = new OperationColumnStore(0, 0);
+    store.operationTypes = columns.operationTypes;
+    store.operationIndexes = columns.operationIndexes;
+    store.operationLengths = columns.operationLengths;
+    store.timestamps = columns.timestamps;
+    store.insertStarts = columns.insertStarts;
+    store.count = columns.operationTypes.length;
+    // Conservative bounds avoid scanning the adopted columns. Their existing
+    // representations already preserve every value, including fractions.
+    store.maximumIndex =
+      columns.operationIndexes instanceof Uint32Array
+        ? UINT32_MAX
+        : Number.MAX_SAFE_INTEGER;
+    store.maximumLength =
+      columns.operationLengths instanceof Uint32Array
+        ? UINT32_MAX
+        : Number.MAX_SAFE_INTEGER;
+    store.minimumTimestamp =
+      columns.timestamps instanceof Int32Array ? INT32_MIN : -Number.MAX_VALUE;
+    store.maximumTimestamp =
+      columns.timestamps instanceof Int32Array ? INT32_MAX : Number.MAX_VALUE;
+    return store;
   }
 
   get capacity(): number {
@@ -338,6 +366,9 @@ class OperationColumnStore {
       this.operationLengths[at] !== length ||
       this.timestamps[at] !== timestamp
     ) {
+      if (this.timestamps[at] !== timestamp && !Number.isInteger(timestamp)) {
+        this.timestamps = new Float64Array(this.timestamps);
+      }
       this.reserve(this.capacity, this);
       this.operationIndexes[at] = index;
       this.operationLengths[at] = length;
@@ -350,6 +381,12 @@ class OperationColumnStore {
 
   /** Append every event another store holds. */
   appendStore(other: OperationColumnStore): void {
+    if (
+      other.timestamps instanceof Float64Array &&
+      !(this.timestamps instanceof Float64Array)
+    ) {
+      this.timestamps = new Float64Array(this.timestamps);
+    }
     this.reserve(this.count + other.count, other);
     const at = this.count;
     const count = other.count;
@@ -422,13 +459,65 @@ export class PackedLinearChain {
   /** Events after the contiguous prefix, in order. */
   private chunks: OperationColumnStore[] = [];
   private insertedContent = "";
-  private readonly ids: EventIdRunIndex;
+  private ids: EventIdRunIndex;
   private eventCount = 0;
   private base: PackedEventGraphBase | null = null;
 
   /** @param agents Replica numbering shared with the graph the chain backs. */
   constructor(agents: AgentTable = new AgentTable()) {
     this.ids = new EventIdRunIndex(agents);
+  }
+
+  /** Start a growable chain by adopting a sealed causal batch without copies. */
+  static adopt(
+    batch: CausalBatchColumns,
+    base: PackedEventGraphBase,
+  ): PackedLinearChain {
+    const chain = new PackedLinearChain(batch.ids.agents);
+    chain.ids = batch.ids;
+    chain.contiguous = OperationColumnStore.adopt(batch.operationColumns());
+    chain.insertedContent = batch.insertedContent;
+    chain.eventCount = batch.count;
+    chain.base = base;
+    return chain;
+  }
+
+  /** Append parsed causal columns to this chain, with transactional rollback. */
+  appendCausalColumns(batch: CausalBatchColumns): PackedEventGraphBase {
+    const mark = this.mark();
+    const start = this.eventCount;
+    const contentStart = this.insertedContent.length;
+    if (contentStart + batch.insertedContent.length > UINT32_MAX) {
+      throw new Error("Inserted content exceeds packed UTF-16 offset range");
+    }
+    const agents = Array.from({ length: batch.ids.agents.size }, (_, agent) =>
+      this.ids.agents.intern(batch.ids.agents.nameOf(agent)),
+    );
+    try {
+      for (let offset = 0; offset < batch.count; offset++) {
+        const sourceAgent = batch.ids.agentAt(offset);
+        if (sourceAgent === CUSTOM_AGENT) this.ids.append(batch.idAt(offset)!);
+        else
+          this.ids.appendCanonical(
+            agents[sourceAgent]!,
+            batch.ids.sequenceAt(offset),
+          );
+        const store = this.writableChunk(start + offset);
+        const insert = batch.isInsertAt(offset);
+        store.push(
+          insert ? PACKED_OPERATION_TYPE.INSERT : PACKED_OPERATION_TYPE.DELETE,
+          batch.operationIndexAt(offset),
+          batch.operationLengthAt(offset),
+          batch.timestampAt(offset),
+          insert ? contentStart + batch.insertStartAt(offset) : 0,
+        );
+      }
+      this.insertedContent += batch.insertedContent;
+      return this.publish(start + batch.count);
+    } catch (error) {
+      this.rollbackTo(mark);
+      throw error;
+    }
   }
 
   get count(): number {

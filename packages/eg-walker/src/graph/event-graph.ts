@@ -18,6 +18,7 @@ import {
   MissingParentError,
 } from "./event-graph-errors";
 import { canonicalSequenceAfter } from "./event-id";
+import type { CausalBatchColumns } from "./internals/causal-batch-columns";
 import { AgentTable } from "./internals/agent-table";
 import { CUSTOM_AGENT } from "./internals/event-id-run-index";
 import type { GraphRuns } from "./internals/graph-runs";
@@ -319,6 +320,8 @@ export class EventGraph {
     const startingEventCount = this.tail.count;
     const startingJournalLength = this.frontierJournal.length;
     const startingPackedBase = this.packedBase;
+    const startingAgents = this.agents;
+    const startingTail = this.tail;
     const startingLinearChain = this.linearChain;
     const startingLinearChainMark = startingLinearChain?.mark() ?? null;
     let active = true;
@@ -348,6 +351,8 @@ export class EventGraph {
           }
           this.linearChain = startingLinearChain;
           this.packedBase = startingPackedBase;
+          this.agents = startingAgents;
+          this.tail = startingTail;
           this.invalidateDerivedCaches();
         }
       },
@@ -493,6 +498,96 @@ export class EventGraph {
     this.clearFrontier();
     this.addFrontierRank(chain.count - 1);
     return range;
+  }
+
+  /**
+   * Append owned, validated causal columns inside an append transaction.
+   * An empty graph adopts the columns; an existing graph remaps batch-local
+   * parents and agents without parsing each event and parent ID again.
+   * @internal
+   */
+  appendCausalColumns(batch: CausalBatchColumns): void {
+    batch.assertValid();
+    const start = this.getEventCount();
+    const externalRanks = batch.externalParents.map((id) => {
+      const rank = this.insertionRankOf(id);
+      if (rank === undefined) throw new MissingParentError(id);
+      return rank;
+    });
+    if (start === 0) {
+      const base = batch.packedBase();
+      this.invalidateDerivedCaches();
+      this.agents = base.agents;
+      this.tail = new TailEventLog(this.agents);
+      this.packedBase = base;
+      this.linearChain = batch.exactChain
+        ? PackedLinearChain.adopt(batch, base)
+        : null;
+      const runs = base.runs;
+      for (let run = 0; run < runs.count; run++) {
+        if (runs.childCountOf(run) === 0)
+          this.addFrontierRank(runs.lastOf(run));
+      }
+      return;
+    }
+
+    if (
+      batch.exactChain &&
+      this.canAppendLinearEvents(batch.eventAt(0).parentVersion)
+    ) {
+      this.packedBase = this.linearChain!.appendCausalColumns(batch);
+      this.invalidateDerivedCaches();
+      this.clearFrontier();
+      this.addFrontierRank(this.packedBase.count - 1);
+      return;
+    }
+
+    const agents = Array.from({ length: batch.ids.agents.size }, (_, agent) =>
+      this.agents.intern(batch.ids.agents.nameOf(agent)),
+    );
+    const parentRanks: number[] = [];
+    let explicit = 0;
+    for (let offset = 0; offset < batch.count; offset++) {
+      const id = batch.idAt(offset)!;
+      const sourceAgent = batch.ids.agentAt(offset);
+      const agent = sourceAgent < 0 ? CUSTOM_AGENT : agents[sourceAgent]!;
+      const sequence = batch.ids.sequenceAt(offset);
+      if (this.hasParsedEvent(id, agent, sequence)) {
+        throw new EventAlreadyExistsError(id);
+      }
+      parentRanks.length = 0;
+      if (batch.explicit[explicit] === offset) {
+        for (
+          let edge = batch.parentStarts[explicit]!;
+          edge < batch.parentStarts[explicit + 1]!;
+          edge++
+        ) {
+          const parent = batch.parents[edge]!;
+          parentRanks.push(
+            parent < 0 ? externalRanks[-1 - parent]! : start + parent,
+          );
+        }
+        explicit++;
+      } else if (offset > 0) {
+        parentRanks.push(start + offset - 1);
+      }
+      this.tail.append(
+        id,
+        agent,
+        sequence,
+        batch.operationAt(offset),
+        batch.timestampAt(offset),
+        parentRanks,
+      );
+      const rank = start + offset;
+      for (const parent of parentRanks) {
+        this.appendTailChildRank(parent, rank);
+        this.deleteFrontierRank(parent);
+      }
+      this.addFrontierRank(rank, id);
+    }
+    this.forgetAppended();
+    this.invalidateDerivedCaches();
   }
 
   /**

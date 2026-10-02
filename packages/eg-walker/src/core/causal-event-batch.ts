@@ -1,6 +1,6 @@
-import { OPERATION_TYPE } from "../constants/operation-types";
-import type { EventId, GraphEvent } from "../types";
-import { assertWellFormedUtf16 } from "./invariants";
+import { CausalBatchColumns } from "../graph/internals/causal-batch-columns";
+import type { EventId } from "../types";
+import { assertWellFormedUtf16, isWellFormedUtf16 } from "./invariants";
 
 const causalEventBatchBrand: unique symbol = Symbol("CausalEventBatch");
 
@@ -43,23 +43,19 @@ export interface CausalEventBatchBuilder {
 }
 
 interface CausalEventBatchState {
-  events: ReadonlyArray<GraphEvent> | null;
-  /** Whether each event after the first names only the event before it. */
-  readonly exactChain: boolean;
+  columns: CausalBatchColumns | null;
 }
 
 const batchStates = new WeakMap<CausalEventBatch, CausalEventBatchState>();
 
 class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
-  #events: GraphEvent[];
+  #columns: CausalBatchColumns | null;
   #eventCount = 0;
   #finished = false;
   #appending = false;
-  #exactChain = true;
-  #lastId: EventId = "";
 
   constructor(capacity: number) {
-    this.#events = new Array<GraphEvent>(assertValidCapacity(capacity));
+    this.#columns = new CausalBatchColumns(assertValidCapacity(capacity));
   }
 
   get eventCount(): number {
@@ -82,16 +78,21 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
       if (typeof text !== "string") {
         throw new Error(`causal event ${id} insert text must be a string`);
       }
-      assertWellFormedUtf16(text, `causal event ${id} insert text`);
+      if (!isWellFormedUtf16(text)) {
+        assertWellFormedUtf16(text, `causal event ${id} insert text`);
+      }
       assertValidTimestamp(timestamp, id);
-      const parents = copyParentVersion(id, parentVersion);
+      assertIterableParents(id, parentVersion);
 
-      this.appendOwnedEvent({
+      this.#columns!.append(
         id,
-        parentVersion: parents,
-        operation: { type: OPERATION_TYPE.INSERT, index, text },
+        parentVersion,
+        index,
+        text,
+        text.length,
         timestamp,
-      });
+      );
+      this.#eventCount++;
       return this;
     } finally {
       this.#appending = false;
@@ -117,14 +118,10 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
         );
       }
       assertValidTimestamp(timestamp, id);
-      const parents = copyParentVersion(id, parentVersion);
+      assertIterableParents(id, parentVersion);
 
-      this.appendOwnedEvent({
-        id,
-        parentVersion: parents,
-        operation: { type: OPERATION_TYPE.DELETE, index, length },
-        timestamp,
-      });
+      this.#columns!.append(id, parentVersion, index, null, length, timestamp);
+      this.#eventCount++;
       return this;
     } finally {
       this.#appending = false;
@@ -136,9 +133,9 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
     this.assertNotAppending();
     this.#finished = true;
 
-    const events = this.#events;
-    events.length = this.#eventCount;
-    this.#events = [];
+    const columns = this.#columns!;
+    columns.finish();
+    this.#columns = null;
 
     const batchCandidate = { eventCount: this.#eventCount };
     Object.defineProperty(batchCandidate, causalEventBatchBrand, {
@@ -148,23 +145,8 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
       writable: false,
     });
     const batch = Object.freeze(batchCandidate) as CausalEventBatch;
-    batchStates.set(batch, { events, exactChain: this.#exactChain });
+    batchStates.set(batch, { columns });
     return batch;
-  }
-
-  private appendOwnedEvent(event: GraphEvent): void {
-    // The parents were just copied, so checking the chain shape here costs
-    // one lookup in a hot set instead of a second pass over the batch.
-    if (
-      this.#eventCount > 0 &&
-      this.#exactChain &&
-      (event.parentVersion.size !== 1 || !event.parentVersion.has(this.#lastId))
-    ) {
-      this.#exactChain = false;
-    }
-    this.#events[this.#eventCount] = event;
-    this.#eventCount++;
-    this.#lastId = event.id;
   }
 
   private assertOpen(): void {
@@ -185,7 +167,7 @@ class CausalEventBatchBuilderImplementation implements CausalEventBatchBuilder {
  *
  * `capacity` is an optional exact-or-upper-bound allocation hint. Appending
  * more events remains supported, and finishing below the hint trims the
- * transferred array without copying its event objects.
+ * column views without copying their contents.
  */
 export const createCausalEventBatchBuilder = (
   capacity = 0,
@@ -201,25 +183,17 @@ export const isOwnedCausalEventBatch = (
   batchStates.has(value as CausalEventBatch);
 
 /**
- * @internal Borrow the batch's owned events for an apply attempt.
- *
- * The builder created these objects and no public API returns them, so the
- * apply attempt may store them without a copy through
- * `EventGraph.addOwnedEvent`. Ownership is not recorded on the events: every
- * other path treats an event as caller-owned and copies it.
- *
- * This operation does not consume the batch. A caller must invoke
- * {@link consumeCausalEventBatch} only after its transaction commits, which
- * leaves the same batch reusable after validation or integration failure.
+ * @internal Borrow owned columns without consuming them. A failed apply may
+ * reuse the batch; consume it only after the graph and document commit.
  */
 export const inspectCausalEventBatch = (
   batch: CausalEventBatch,
-): ReadonlyArray<GraphEvent> => {
+): CausalBatchColumns => {
   const state = getOwnedBatchState(batch);
-  if (state.events === null) {
+  if (state.columns === null) {
     throw new Error("Causal event batch is already consumed");
   }
-  return state.events;
+  return state.columns;
 };
 
 /**
@@ -228,15 +202,15 @@ export const inspectCausalEventBatch = (
  * this while copying parents, so an apply attempt need not scan the batch.
  */
 export const isExactCausalChain = (batch: CausalEventBatch): boolean =>
-  getOwnedBatchState(batch).exactChain;
+  inspectCausalEventBatch(batch).exactChain;
 
 /** @internal Mark a successfully applied batch consumed and release events. */
 export const consumeCausalEventBatch = (batch: CausalEventBatch): void => {
   const state = getOwnedBatchState(batch);
-  if (state.events === null) {
+  if (state.columns === null) {
     throw new Error("Causal event batch is already consumed");
   }
-  state.events = null;
+  state.columns = null;
 };
 
 const getOwnedBatchState = (batch: CausalEventBatch): CausalEventBatchState => {
@@ -280,27 +254,15 @@ const assertValidTimestamp = (timestamp: number, eventId: EventId): void => {
   }
 };
 
-const copyParentVersion = (
+const assertIterableParents = (
   eventId: EventId,
   parentVersion: Iterable<EventId>,
-): Set<EventId> => {
+): void => {
   if (!isIterable(parentVersion)) {
     throw new Error(
       `causal event ${eventId} parentVersion must be an iterable of event IDs`,
     );
   }
-
-  const copy = new Set<EventId>();
-  for (const parentId of parentVersion) {
-    if (typeof parentId !== "string" || parentId.length === 0) {
-      throw new Error(`causal event ${eventId} has an invalid parent event ID`);
-    }
-    if (parentId === eventId) {
-      throw new Error(`causal event ${eventId} cannot parent itself`);
-    }
-    copy.add(parentId);
-  }
-  return copy;
 };
 
 const isIterable = (value: unknown): value is Iterable<unknown> => {

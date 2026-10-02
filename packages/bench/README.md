@@ -479,7 +479,7 @@ node scripts/compare-paper-bench.mjs \
   /path/to/egwalker-paper /path/to/results/full persistence 3
 ```
 
-The Linux comparison driver runs all seven datasets without event/transaction
+The comparison driver runs all seven datasets without event/transaction
 limits, with a fresh process per sample and alternating version order. It uses
 4096-event causal batches in the isolated apply lane and the existing detailed
 receive/persistence harness in the persistence lane. It records each command,
@@ -488,6 +488,20 @@ stops repeated samples for that version/dataset; it is never a speedup sample.
 Each process has a 6656 MiB V8 heap limit and a ten-minute timeout. Use a new
 output directory for every comparison. `benchmark-worker.mjs` obtains peak RSS
 from Node itself, so GNU `time` is not required.
+
+For whole-trace causal apply and isolated native decode + cold replay (the
+#982 lanes), use `apply-all` and `native` respectively. Both use the same
+fresh-process, alternating-order protocol; the driver uses Node's timeout
+on macOS and Linux, without requiring GNU `timeout`:
+
+```bash
+node scripts/compare-paper-bench.mjs \
+  /tmp/before/paper-bench.mjs /tmp/after/paper-bench.mjs \
+  /path/to/egwalker-paper /path/to/results/apply-all apply-all 3
+node scripts/compare-paper-bench.mjs \
+  /tmp/before/paper-bench.mjs /tmp/after/paper-bench.mjs \
+  /path/to/egwalker-paper /path/to/results/native native 3
+```
 
 For the 20-case focused matrix, use the same bundling snippet in the current
 checkout with `entry: { "replay-optimization": "src/bench/replay-optimization.ts" }`

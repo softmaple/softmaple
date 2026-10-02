@@ -23,6 +23,7 @@ import {
 } from "./internals/delete-handler";
 import {
   CUSTOM_EVENT_AGENT,
+  DEFAULT_INTEGRATION_SCAN_BUDGET,
   formatPlaceholderId,
   ItemTable,
   PLACEHOLDER_AGENT,
@@ -33,6 +34,7 @@ import {
   type GeneratedDocument,
   type GenerateOptions,
   type IncrementalApplyResult,
+  type IntegrationScanBudget,
   type ItemKey,
 } from "./internals/engine-types";
 import { EngineEventSet } from "./internals/engine-event-set";
@@ -216,6 +218,10 @@ export class EgWalkerEngine {
   private placeholderCounter = 0;
   private integrationProbeCount = 0;
   private useLinearIntegrationOracle = false;
+  private integrationScanBudget: IntegrationScanBudget =
+    DEFAULT_INTEGRATION_SCAN_BUDGET;
+  /** Probes conflict scans have spent since the last reset. */
+  private integrationScanProbes = 0;
   private prepareViewMayContainSurrogatePairs = false;
   private deferTextMaterialization = false;
   private packedReplayPlan: PackedCriticalReplayPlan | null = null;
@@ -1008,6 +1014,7 @@ export class EgWalkerEngine {
     this.segmentedPlaceholders.clear();
     this.items.clear();
     this.originLeftIndex.clear();
+    // Unbuilt until a conflict needs it: restoring pays nothing for it.
     this.fugueOrder.clear();
     const records = state.compactSequenceRecords
       ? recordsFromCompactRecords(state.compactSequenceRecords)
@@ -1039,6 +1046,8 @@ export class EgWalkerEngine {
     this.peakSequenceRecordCount = items.length;
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle = false;
+    this.integrationScanBudget = DEFAULT_INTEGRATION_SCAN_BUDGET;
+    this.integrationScanProbes = 0;
     this.placeholderCounter = inferNextPlaceholderCounter(items);
 
     items.forEach((item, index) => {
@@ -1046,7 +1055,6 @@ export class EgWalkerEngine {
       this.originLeftIndex.track(item.id, item.originLeft);
       this.trackEventItems(item, records[index]!.eventId);
     });
-    this.fugueOrder.rebuild(items);
 
     const deleteTargets = state.compactDeleteTargets
       ? iterateCompactDeleteTargets(state.compactDeleteTargets)
@@ -2146,7 +2154,7 @@ export class EgWalkerEngine {
     this.deleteTargets.clear();
     this.items.clear();
     this.originLeftIndex.clear();
-    this.fugueOrder.clear();
+    this.fugueOrder.clear(options.integrationMode === "indexed");
     this.sequence.clear();
     this.currentVersion = this.localVersionsOf(options.initialVersion ?? []);
     this.resultingText =
@@ -2164,6 +2172,9 @@ export class EgWalkerEngine {
     this.integrationProbeCount = 0;
     this.useLinearIntegrationOracle =
       options.integrationMode === "linear-oracle";
+    this.integrationScanBudget =
+      options.integrationScanBudget ?? DEFAULT_INTEGRATION_SCAN_BUDGET;
+    this.integrationScanProbes = 0;
     this.objectInsertTail = null;
     this.objectInsertNextPrepareIndex = -1;
     this.objectInsertTailResult.item = null;
@@ -2211,9 +2222,7 @@ export class EgWalkerEngine {
       sequenceLeaf: null,
       runNode: null,
     };
-    if (!this.fugueOrder.integrateAtKnownPosition(placeholder)) {
-      throw new Error("Fugue order index unavailable for initial text");
-    }
+    this.fugueOrder.integrateAtKnownPosition(placeholder);
     this.sequence.insert(0, placeholder);
     this.items.add(placeholder);
     this.samplePeakSequenceRecordCount();
@@ -2673,8 +2682,13 @@ export class EgWalkerEngine {
     },
     recordIntegrationProbe: () => {
       this.integrationProbeCount++;
+      this.integrationScanProbes++;
     },
     useLinearIntegrationOracle: () => this.useLinearIntegrationOracle,
+    integrationScanLimit: () =>
+      this.integrationScanBudget.initial +
+      this.integrationScanBudget.perRecord * this.sequence.length -
+      this.integrationScanProbes,
   };
 
   private readonly deleteDeps: DeleteHandlerDeps = {

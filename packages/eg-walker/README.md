@@ -86,8 +86,11 @@ has a few different engineering boundaries:
   internal CRDT state at critical versions.
 - The ordinary in-memory event graph is an object graph. The binary columnar
   representation is used at the codec boundary, not as the live query engine.
-- `FugueOrderIndex` provides logarithmic indexed integration in production;
-  the original linear scan remains only as a differential-test oracle.
+- Concurrent inserts are placed by the paper's linear scan, within a budget
+  of two probes per sequence record. A scan that would overrun it builds
+  `FugueOrderIndex`, which places every later insert of that replay in
+  logarithmic time, so many concurrent inserts at one position stay
+  O(n log n). The unbounded scan remains as a differential-test oracle.
 
 Treat `serialize()` as the paper-aligned state boundary and the columnar codec
 as the Section 3.8 physical encoding. Native snapshots and retained runtime

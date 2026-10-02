@@ -41,6 +41,11 @@
       "cache": false,
       "outputLogs": "full"
     },
+    "same-position-bench": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputLogs": "full"
+    },
     "snapshot-first-edit-bench": {
       "dependsOn": ["^build"],
       "cache": false,

@@ -4,6 +4,12 @@ import type { IndexedSequence } from "../indexed-sequence";
 import type { AugmentedCRDTItem, ItemTable } from "./engine-types";
 
 /**
+ * Returned by {@link findIntegrationPosition} when placing the item would
+ * take more probes than the caller allowed.
+ */
+export const INTEGRATION_SCAN_LIMIT_EXCEEDED = -1;
+
+/**
  * YjsMod / Fugue-family integration scan used by the paper's reference
  * implementation.
  *
@@ -18,6 +24,10 @@ import type { AugmentedCRDTItem, ItemTable } from "./engine-types";
  * Two concurrent items with identical origins are ordered by
  * {@link compareEventIds}: the smaller event ID wins and is placed
  * first, matching Yjs's `id.client` tie-break.
+ *
+ * Each record the scan reads is one probe. When the item's position takes
+ * more than `probeLimit` probes, the scan stops and returns
+ * {@link INTEGRATION_SCAN_LIMIT_EXCEEDED}.
  */
 export const findIntegrationPosition = (
   item: AugmentedCRDTItem,
@@ -25,6 +35,7 @@ export const findIntegrationPosition = (
   items: ItemTable,
   eventIdOf: (item: AugmentedCRDTItem) => EventId,
   recordProbe: () => void = () => undefined,
+  probeLimit: number = Number.POSITIVE_INFINITY,
 ): number => {
   const leftItem = item.originLeft !== null ? items.at(item.originLeft) : null;
   const rightItem =
@@ -36,8 +47,13 @@ export const findIntegrationPosition = (
   let scanPos = leftPos + 1;
   let scanCandidate = scanPos;
   let scanning = false;
+  let probes = 0;
 
   while (scanPos < rightPos) {
+    if (probes >= probeLimit) {
+      return INTEGRATION_SCAN_LIMIT_EXCEEDED;
+    }
+    probes++;
     recordProbe();
     const other = sequence.at(scanPos);
     if (!other) {

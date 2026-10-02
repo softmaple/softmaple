@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "replay-bench": "node --expose-gc scripts/run-replay-bench.mjs",
     "repeated-ingest-bench": "node scripts/run-repeated-ingest-bench.mjs",
+    "same-position-bench": "node scripts/run-same-position-bench.mjs",
     "snapshot-first-edit-bench": "node scripts/run-snapshot-first-edit-bench.mjs",
     "wide-frontier-bench": "node scripts/run-wide-frontier-bench.mjs"
   },

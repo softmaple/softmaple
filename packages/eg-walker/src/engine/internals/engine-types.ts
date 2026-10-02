@@ -176,9 +176,44 @@ export interface GenerateOptions {
    * checkpoint replay.
    */
   readonly eventOrder?: ReadonlyArray<GraphEvent>;
-  /** Test-only slow oracle; production always uses FugueOrderIndex. */
-  readonly integrationMode?: "indexed" | "linear-oracle";
+  /**
+   * Test-only: how an insert whose conflict region is not empty finds its
+   * position. Production leaves it unset, which means `"adaptive"`:
+   *
+   * - `"adaptive"`: the linear scan, within {@link integrationScanBudget}.
+   *   The first scan that would overrun it builds the `FugueOrderIndex`,
+   *   which places that insert and every later one.
+   * - `"indexed"`: maintain the `FugueOrderIndex` from the start.
+   * - `"linear-oracle"`: the unbounded linear scan and no index, without the
+   *   shortcuts that append to the previous insert's record.
+   */
+  readonly integrationMode?: "adaptive" | "indexed" | "linear-oracle";
+  /**
+   * Test-only: the adaptive scan's probe budget. Defaults to
+   * {@link DEFAULT_INTEGRATION_SCAN_BUDGET}.
+   */
+  readonly integrationScanBudget?: IntegrationScanBudget;
 }
+
+/**
+ * Probes the adaptive conflict scan may spend since the engine's last reset
+ * before the engine builds its `FugueOrderIndex`: `initial`, plus `perRecord`
+ * for each record in the sequence.
+ */
+export interface IntegrationScanBudget {
+  readonly initial: number;
+  readonly perRecord: number;
+}
+
+/**
+ * Two probes per record cost about what maintaining the index for that record
+ * would. On the paper traces nearly every scan stops at its first record, and
+ * the few that cross thousands stay within the budget. Concurrent inserts that
+ * keep landing at one position spend it within a dozen inserts, after which
+ * the index keeps the burst O(n log n).
+ */
+export const DEFAULT_INTEGRATION_SCAN_BUDGET: IntegrationScanBudget =
+  Object.freeze({ initial: 32, perRecord: 2 });
 
 export interface GeneratedDocument {
   readonly text: string;

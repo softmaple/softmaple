@@ -12,7 +12,10 @@ import { OriginLeftIndex } from "./origin-left-index";
 import { PendingInsertBuffer } from "./pending-insert-buffer";
 import { RecordSplitter } from "./record-splitter";
 import { FugueOrderIndex } from "./fugue-order-index";
-import { findIntegrationPosition } from "./yata-integration";
+import {
+  findIntegrationPosition,
+  INTEGRATION_SCAN_LIMIT_EXCEEDED,
+} from "./yata-integration";
 
 const NO_TRANSFORMED_OPERATIONS: ReadonlyArray<ExternalOperation> =
   Object.freeze([]);
@@ -31,7 +34,12 @@ export interface InsertHandlerDeps {
   readonly insertText: (index: number, text: string) => void;
   readonly recordIntegrationProbe: () => void;
   readonly useLinearIntegrationOracle: () => boolean;
-  /** Formats an item's event ID for the linear oracle's tie-breaks. */
+  /**
+   * Probes the next conflict scan may take before {@link fugueOrder} has to
+   * be built instead.
+   */
+  readonly integrationScanLimit: () => number;
+  /** Formats an item's event ID for the linear scan's tie-breaks. */
   readonly eventIdOf: (item: AugmentedCRDTItem) => EventId;
 }
 
@@ -117,7 +125,6 @@ export const applyInsert = (
     flushPendingInsert,
     itemToEffectIndex,
     insertText,
-    recordIntegrationProbe,
     useLinearIntegrationOracle,
   } = deps;
 
@@ -274,41 +281,16 @@ export const applyInsert = (
     sequenceLeaf: null,
     runNode: null,
   };
-  const indexedFirstPosition =
-    useOracle || conflictRegionEmpty ? null : fugueOrder.integrate(firstItem);
-  const indexedKnownPositionIntegrated =
-    useOracle || !conflictRegionEmpty
-      ? true
-      : fugueOrder.integrateAtKnownPosition(firstItem);
-  const oracleFirstPosition =
-    useOracle && !conflictRegionEmpty
-      ? findIntegrationPosition(
-          firstItem,
-          sequence,
-          items,
-          deps.eventIdOf,
-          recordIntegrationProbe,
-        )
-      : null;
-  if (
-    !useOracle &&
-    (indexedKnownPositionIntegrated === false ||
-      (!conflictRegionEmpty && indexedFirstPosition === null))
-  ) {
-    throw new Error(`Fugue order index unavailable for event ${localVersion}`);
-  }
-  const actualFirstPosition = knownBoundary
-    ? -1
-    : conflictRegionEmpty
-      ? firstInsertPosition
-      : useOracle
-        ? oracleFirstPosition!
-        : indexedFirstPosition!;
-  if (
-    indexedFirstPosition !== null &&
-    indexedFirstPosition !== actualFirstPosition
-  ) {
-    fugueOrder.invalidate();
+  let firstPosition = firstInsertPosition;
+  if (!conflictRegionEmpty) {
+    firstPosition = findConflictPosition(
+      firstItem,
+      localVersion,
+      useOracle,
+      deps,
+    );
+  } else if (!useOracle) {
+    fugueOrder.integrateAtKnownPosition(firstItem);
   }
   if (knownBoundary) {
     if (
@@ -320,7 +302,7 @@ export const applyInsert = (
       );
     }
   } else {
-    sequence.insert(actualFirstPosition, firstItem);
+    sequence.insert(firstPosition, firstItem);
   }
   items.add(firstItem);
   originLeftIndex.track(firstItem.id, firstItem.originLeft);
@@ -366,4 +348,39 @@ export const applyInsert = (
         },
       ]
     : NO_TRANSFORMED_OPERATIONS;
+};
+
+/**
+ * Position of an insert whose conflict region is not empty.
+ *
+ * Until the engine's {@link FugueOrderIndex} is built, run the paper's linear
+ * scan, which almost always stops at the first record, within the probes left
+ * in the engine's scan budget. A scan that would overrun the budget builds the
+ * index instead, and the index places this insert and every later one, so
+ * adversarial inputs stay logarithmic. The linear oracle always scans.
+ */
+const findConflictPosition = (
+  item: AugmentedCRDTItem,
+  localVersion: number,
+  useOracle: boolean,
+  deps: InsertHandlerDeps,
+): number => {
+  if (useOracle || !deps.fugueOrder.isBuilt) {
+    const scanned = findIntegrationPosition(
+      item,
+      deps.sequence,
+      deps.items,
+      deps.eventIdOf,
+      deps.recordIntegrationProbe,
+      useOracle ? Number.POSITIVE_INFINITY : deps.integrationScanLimit(),
+    );
+    if (scanned !== INTEGRATION_SCAN_LIMIT_EXCEEDED) {
+      return scanned;
+    }
+  }
+  const indexed = deps.fugueOrder.integrate(item);
+  if (indexed === null) {
+    throw new Error(`Fugue order index unavailable for event ${localVersion}`);
+  }
+  return indexed;
 };

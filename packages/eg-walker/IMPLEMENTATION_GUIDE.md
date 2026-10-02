@@ -96,6 +96,16 @@ integration position. The record splits where a later insert or delete
 lands. Concurrent or divergent events still fall back to the full
 prepare/effect replay path; both paths produce identical output.
 
+When the range is not empty, `applyInsert` runs the scan within the engine's
+probe budget, `DEFAULT_INTEGRATION_SCAN_BUDGET`: 32 probes plus 2 for each
+sequence record since the engine's last reset. On the paper traces nearly
+every scan stops at its first record, and the engine maintains no
+`FugueOrderIndex` at all, not even for inserts at known positions or record
+splits. The first scan that would overrun the budget builds the index from
+the sequence; the index then places that insert and every later one in
+logarithmic time, so a burst of concurrent inserts at one position stays
+O(n log n).
+
 Stats exposed on `GeneratedDocument.stats.nonConflictingRunCount` and
 `fullReplayCount` (also surfaced through `ReplayWalker.walk`) let callers
 and tests verify which path was taken.

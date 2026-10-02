@@ -383,6 +383,47 @@ node scripts/run-wide-frontier-bench.mjs \
 `--apis single` or `--apis batch` runs one API. `--output` receives
 `summary.md` and `runs.jsonl`; each invocation replaces both files.
 
+## Same-position cold replay
+
+`same-position-bench` measures replaying many concurrent inserts at one
+position, the worst case for the integration scan. `--events` replicas each
+insert one letter at the same position, all concurrent with one another, in
+each of three `--shapes`:
+
+| Shape    | History                                                              |
+| -------- | -------------------------------------------------------------------- |
+| `root`   | parentless inserts at index 0                                        |
+| `after`  | a base insert, then inserts at index 1 whose only parent is the base |
+| `before` | a base insert, then inserts at index 0 whose only parent is the base |
+
+Replica IDs ascend with the insert order, so every insert sorts after the
+earlier ones and a linear scan would cross all of them. The history is encoded
+as EGW4 and decoded outside the timer; the measured cold replay builds a
+replica from the decoded graph and reads its text. For each count and shape
+the summary reports:
+
+- the replay time and the time per event;
+- the time per event divided by the time per event at the smallest
+  `--events`, which grows only logarithmically while the replay is
+  O(n log n);
+- the scan probes and integration-index builds of the replay.
+
+Each sample runs in a fresh process: one untimed round of `--warmup-events`
+events, then the measured round. Every round checks the exact text, and the
+driver requires every implementation to produce the same text for a given
+shape and count. It alternates the implementation order between runs:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-same-position-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --events 1000,10000,100000 --runs 3 --output /path/to/results
+```
+
+`--output` receives `summary.md` and `runs.jsonl`; each invocation replaces
+both files.
+
 ## Replay optimization A/B workers
 
 `replay-bench` adds full-text-checked threshold, receive API, graph import and

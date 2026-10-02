@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
+import {
+  DEFAULT_INTEGRATION_SCAN_BUDGET,
+  type EngineStats,
+  type IntegrationScanBudget,
+} from "../engine/internals/engine-types";
 import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../types";
 import { traceParamsArb } from "./property/arbitraries";
@@ -59,6 +64,26 @@ const splitInitialPlaceholder = (count: number): GraphEvent[] =>
     timestamp: index,
   }));
 
+const descendingConcurrentRoots = (count: number): GraphEvent[] =>
+  concurrentRoots(count).map((event, index) => ({
+    ...event,
+    id: `root:${count - 1 - index}`,
+  }));
+
+const prepends = (count: number): GraphEvent[] =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `author:${index}`,
+    parentVersion: new Set(index === 0 ? [] : [`author:${index - 1}`]),
+    operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "p" },
+    timestamp: index,
+  }));
+
+const samePositionBursts = [
+  { shape: "root siblings", build: concurrentRoots },
+  { shape: "right siblings of one record", build: concurrentAfterBase },
+  { shape: "left siblings of one record", build: concurrentBeforeBase },
+] as const;
+
 const splitTypedRunWithRootFork = (count: number): GraphEvent[] => [
   ...Array.from({ length: count }, (_, index) => ({
     id: `author:${index}`,
@@ -86,6 +111,7 @@ describe("FugueOrderIndex structural bounds", () => {
     const generated = new EgWalkerEngine().generate(events, "", {
       eventGraph: graph,
       eventOrder: events,
+      integrationMode: "indexed",
     });
 
     expect(generated.text).toHaveLength(events.length);
@@ -103,6 +129,7 @@ describe("FugueOrderIndex structural bounds", () => {
     const generated = new EgWalkerEngine().generate(events, "", {
       eventGraph: graph,
       eventOrder: events,
+      integrationMode: "indexed",
     });
 
     expect(generated.text).toHaveLength(events.length);
@@ -120,6 +147,7 @@ describe("FugueOrderIndex structural bounds", () => {
     const generated = new EgWalkerEngine().generate(events, "", {
       eventGraph: graph,
       eventOrder: events,
+      integrationMode: "indexed",
     });
 
     expect(generated.text).toHaveLength(events.length);
@@ -138,6 +166,7 @@ describe("FugueOrderIndex structural bounds", () => {
       const stats = new EgWalkerEngine().generate(events, "", {
         eventGraph: graph,
         eventOrder: events,
+        integrationMode: "indexed",
       }).stats;
       return {
         size,
@@ -169,6 +198,7 @@ describe("FugueOrderIndex structural bounds", () => {
     const indexed = indexedEngine.generate(events, "", {
       eventGraph: graph,
       eventOrder: events,
+      integrationMode: "indexed",
     });
     const oracle = oracleEngine.generate(events, "", {
       eventGraph: graph,
@@ -201,6 +231,7 @@ describe("FugueOrderIndex structural bounds", () => {
     const indexed = indexedEngine.generate(events, initialText, {
       eventGraph: graph,
       eventOrder: events,
+      integrationMode: "indexed",
     });
     const oracle = oracleEngine.generate(events, initialText, {
       eventGraph: graph,
@@ -230,6 +261,7 @@ describe("FugueOrderIndex structural bounds", () => {
     const indexed = indexedEngine.generate(events, "", {
       eventGraph: graph,
       eventOrder: events,
+      integrationMode: "indexed",
     });
     const oracle = oracleEngine.generate(events, "", {
       eventGraph: graph,
@@ -252,7 +284,7 @@ describe("FugueOrderIndex structural bounds", () => {
     expect(indexed.stats.fugueMarkerOperations).toBeLessThanOrEqual(6);
   });
 
-  it("matches generated compound traces without production conflict scans", () => {
+  it("matches generated compound traces without conflict scans", () => {
     fc.assert(
       fc.property(
         traceParamsArb({
@@ -269,6 +301,7 @@ describe("FugueOrderIndex structural bounds", () => {
           const generated = indexedEngine.generate(order, params.initialText, {
             eventGraph: graph,
             eventOrder: order,
+            integrationMode: "indexed",
           });
           const oracleEngine = new EgWalkerEngine();
           const oracle = oracleEngine.generate(order, params.initialText, {
@@ -297,7 +330,238 @@ describe("FugueOrderIndex structural bounds", () => {
   });
 });
 
+describe("adaptive conflict integration", () => {
+  it("never builds the index while every insert lands at a known position", () => {
+    // Arrange
+    const events = prepends(400);
+    const graph = EventGraph.fromEvents(events);
+
+    // Act
+    const adaptive = new EgWalkerEngine().generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    const indexed = new EgWalkerEngine().generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+      integrationMode: "indexed",
+    });
+
+    // Assert
+    expect(adaptive.text).toBe(indexed.text);
+    expect(adaptive.stats.sequenceRecordCount).toBe(events.length);
+    expect(adaptive.stats.integrationProbeCount).toBe(0);
+    expect(adaptive.stats.fugueRebuilds).toBe(0);
+    expect(adaptive.stats.fugueMarkerOperations).toBe(0);
+    expect(indexed.stats.fugueMarkerOperations).toBe(events.length * 3);
+  });
+
+  it("places conflicts that stop at the first record without the index", () => {
+    // Arrange: every insert sorts before its earlier siblings.
+    const events = descendingConcurrentRoots(1_600);
+    const graph = EventGraph.fromEvents(events);
+    const adaptiveEngine = new EgWalkerEngine();
+    const indexedEngine = new EgWalkerEngine();
+
+    // Act
+    const adaptive = adaptiveEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+    });
+    indexedEngine.generate(events, "", {
+      eventGraph: graph,
+      eventOrder: events,
+      integrationMode: "indexed",
+    });
+
+    // Assert
+    expect(adaptiveEngine.getSequenceRecords()).toEqual(
+      indexedEngine.getSequenceRecords(),
+    );
+    expect(adaptive.stats.integrationProbeCount).toBe(events.length - 1);
+    expect(adaptive.stats.fugueRebuilds).toBe(0);
+    expect(adaptive.stats.fugueMarkerOperations).toBe(0);
+  });
+
+  for (const { shape, build } of samePositionBursts) {
+    it(`builds the index once for a same-position burst of ${shape}`, () => {
+      // Arrange: every insert sorts after its earlier siblings, so an
+      // unbounded scan would cross all of them.
+      const events = build(1_600);
+      const graph = EventGraph.fromEvents(events);
+      const adaptiveEngine = new EgWalkerEngine();
+      const indexedEngine = new EgWalkerEngine();
+
+      // Act
+      const adaptive = adaptiveEngine.generate(events, "", {
+        eventGraph: graph,
+        eventOrder: events,
+      });
+      const indexed = indexedEngine.generate(events, "", {
+        eventGraph: graph,
+        eventOrder: events,
+        integrationMode: "indexed",
+      });
+
+      // Assert
+      expect(adaptive.text).toBe(indexed.text);
+      expect(adaptiveEngine.getSequenceRecords()).toEqual(
+        indexedEngine.getSequenceRecords(),
+      );
+      expect(adaptive.stats.fugueRebuilds).toBe(1);
+      expectWithinScanBudget(adaptive.stats, DEFAULT_INTEGRATION_SCAN_BUDGET);
+      // The build and the later inserts index every record exactly once.
+      expect(adaptive.stats.fugueMarkerOperations).toBe(
+        adaptive.stats.sequenceRecordCount * 3,
+      );
+      expect(adaptive.stats.fugueComparisons).toBeLessThan(
+        events.length * Math.ceil(Math.log2(events.length)) * 8,
+      );
+    });
+
+    it(`scales a same-position burst of ${shape} as O(n log n)`, () => {
+      const sizes = [400, 800, 1_600] as const;
+      const measurements = sizes.map((size) => {
+        const events = build(size);
+        const graph = EventGraph.fromEvents(events);
+        const stats = new EgWalkerEngine().generate(events, "", {
+          eventGraph: graph,
+          eventOrder: events,
+        }).stats;
+        return {
+          size,
+          work:
+            stats.integrationProbeCount +
+            stats.fugueComparisons +
+            stats.fugueMarkerOperations +
+            stats.fugueRotations +
+            stats.sequenceTreeOperations,
+        };
+      });
+
+      for (const measurement of measurements) {
+        expect(measurement.work).toBeLessThan(
+          measurement.size * Math.ceil(Math.log2(measurement.size)) * 80,
+        );
+      }
+      expect(measurements[1]!.work / measurements[0]!.work).toBeLessThan(2.75);
+      expect(measurements[2]!.work / measurements[1]!.work).toBeLessThan(2.75);
+    });
+  }
+
+  it("builds a restored engine's index only once a conflict needs it", () => {
+    // Arrange
+    const events = concurrentRoots(64);
+    const graph = EventGraph.fromEvents(events);
+    const live = new EgWalkerEngine();
+    live.generate(events, "", { eventGraph: graph, eventOrder: events });
+    const restored = EgWalkerEngine.fromSnapshotState({
+      graph,
+      currentVersion: live.getCurrentVersion(),
+      text: live.getText(),
+      sequenceRecords: live.getSequenceRecords(),
+      deleteTargets: live.getDeleteTargetRecords(),
+    });
+    expect(restored.getStats().fugueRebuilds).toBe(0);
+
+    // Act: more roots that sort after every earlier one.
+    for (const event of concurrentRoots(256).slice(64)) {
+      graph.addEvent(event);
+      const expected = live.applyEvent(event, graph);
+      const actual = restored.applyEvent(event, graph);
+
+      // Assert
+      expect(actual.text).toBe(expected.text);
+      expect(actual.transformedOperations).toEqual(
+        expected.transformedOperations,
+      );
+    }
+    expect(restored.getSequenceRecords()).toEqual(live.getSequenceRecords());
+    expect(restored.getStats().fugueRebuilds).toBe(1);
+  });
+
+  it("matches the linear oracle for any scan budget", () => {
+    fc.assert(
+      fc.property(
+        traceParamsArb({
+          minReplicas: 2,
+          maxReplicas: 4,
+          minStepsPerReplica: 2,
+          maxStepsPerReplica: 8,
+        }),
+        fc.constantFrom<IntegrationScanBudget>(
+          { initial: 0, perRecord: 0 },
+          { initial: 1, perRecord: 0 },
+          { initial: 3, perRecord: 0 },
+          { initial: 0, perRecord: 1 },
+          DEFAULT_INTEGRATION_SCAN_BUDGET,
+        ),
+        (params, budget) => {
+          const trace = runTrace(params);
+          const graph = EventGraph.fromEvents(trace.events);
+          const order = graph.getBranchPreservingTopologicalOrder();
+          const adaptiveEngine = new EgWalkerEngine();
+          const adaptive = adaptiveEngine.generate(order, params.initialText, {
+            eventGraph: graph,
+            eventOrder: order,
+            integrationScanBudget: budget,
+          });
+          const oracleEngine = new EgWalkerEngine();
+          const oracle = oracleEngine.generate(order, params.initialText, {
+            eventGraph: graph,
+            eventOrder: order,
+            integrationMode: "linear-oracle",
+          });
+          const cold = new EgWalkerEngine().generate(
+            order,
+            params.initialText,
+            {
+              eventGraph: graph,
+              eventOrder: order,
+              integrationScanBudget: budget,
+              collectTransformedOperations: false,
+            },
+          );
+
+          expect(adaptive.text).toBe(trace.canonicalText);
+          expect(adaptive.text).toBe(oracle.text);
+          expect(cold.text).toBe(oracle.text);
+          expect(adaptive.transformedOperations).toEqual(
+            oracle.transformedOperations,
+          );
+          expect(adaptiveEngine.getSequenceRecords()).toEqual(
+            oracleEngine.getSequenceRecords(),
+          );
+          expect(adaptiveEngine.getDeleteTargetRecords()).toEqual(
+            oracleEngine.getDeleteTargetRecords(),
+          );
+          expectWithinScanBudget(adaptive.stats, budget);
+          expectWithinScanBudget(cold.stats, budget);
+        },
+      ),
+      fcParams(),
+    );
+  });
+});
+
 // Helpers
+
+/**
+ * Scans never spend more than the budget the final record count allows, and
+ * an index that was never built never touched a marker.
+ */
+const expectWithinScanBudget = (
+  stats: EngineStats,
+  budget: IntegrationScanBudget,
+): void => {
+  expect(stats.integrationProbeCount).toBeLessThanOrEqual(
+    budget.initial + budget.perRecord * stats.sequenceRecordCount,
+  );
+  expect(stats.fugueRebuilds).toBeLessThanOrEqual(1);
+  if (stats.fugueRebuilds === 0) {
+    expect(stats.fugueMarkerOperations).toBe(0);
+  }
+};
 
 const adversarialConcurrentRoots = (count: number): GraphEvent[] => {
   const candidateCount = 65_536;

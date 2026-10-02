@@ -47,6 +47,11 @@ export interface FugueOrderStats {
  * ranked Euler-marker sequence. START/VISIT/END markers make a sibling
  * subtree's insertion boundary and visible sequence rank available in
  * worst-case logarithmic time, independent of caller-controlled event IDs.
+ *
+ * A cleared index is unbuilt: it holds no record and ignores records placed
+ * at known positions and record splits, so an engine pays nothing for it
+ * until a conflict needs it. The first {@link integrate} builds it from the
+ * sequence; from then on it holds every record.
  */
 export class FugueOrderIndex {
   private readonly markerSequence = new PackedEulerRankIndex();
@@ -60,7 +65,8 @@ export class FugueOrderIndex {
   private markerTreeOperationOffset = 0;
   private rotations = 0;
   private rebuilds = 0;
-  private valid = true;
+  /** Whether the index holds every record of the sequence, in its order. */
+  private built = false;
 
   /**
    * @param itemAt resolves an item key.
@@ -75,8 +81,19 @@ export class FugueOrderIndex {
     this.reset();
   }
 
-  clear(): void {
+  /**
+   * Drop every record. With `maintain`, the empty index is built and keeps
+   * every record from now on; otherwise it stays unbuilt until the next
+   * {@link integrate}.
+   */
+  clear(maintain: boolean = false): void {
     this.reset();
+    this.built = maintain;
+  }
+
+  /** Whether the index holds every record of the sequence. */
+  get isBuilt(): boolean {
+    return this.built;
   }
 
   getStats(): FugueOrderStats {
@@ -100,30 +117,38 @@ export class FugueOrderIndex {
     this.rebuilds = stats.rebuilds;
   }
 
-  /** Insert and return the record position of the new item's VISIT marker. */
+  /**
+   * Insert and return the record position of the new item's VISIT marker.
+   *
+   * An unbuilt index first builds itself from the sequence, which must not
+   * hold `item` yet. Returns `null` when the built tree does not reproduce
+   * the sequence order.
+   */
   integrate(item: AugmentedCRDTItem): number | null {
+    if (!this.built) {
+      this.rebuild(this.sequence.toArray());
+      if (!this.built) {
+        return null;
+      }
+    }
     return this.integrateInternal(item, true);
   }
 
-  /** Insert when the caller has already proved the document position. */
-  integrateAtKnownPosition(item: AugmentedCRDTItem): boolean {
-    return this.integrateInternal(item, false) !== null;
+  /**
+   * Insert when the caller has already proved the document position. An
+   * unbuilt index ignores the item: building it reads the item from the
+   * sequence.
+   */
+  integrateAtKnownPosition(item: AugmentedCRDTItem): void {
+    if (this.built) {
+      this.integrateInternal(item, false);
+    }
   }
 
   private integrateInternal(
     item: AugmentedCRDTItem,
     collectPosition: boolean,
-  ): number | null {
-    // Record splitting rewrites logical boundaries; until those boundary
-    // objects are represented directly, let the scalar oracle handle the
-    // post-split transition without risking ordering drift. Ordinary anchored
-    // siblings are fully represented by the Euler tree and stay indexed.
-    if (!this.valid) {
-      this.rebuild(this.sequence.toArray());
-      if (!this.valid) {
-        return null;
-      }
-    }
+  ): number {
     const forcedParentId = this.forcedParentById.get(item.id);
     const rightAnchor =
       item.originRight === null ? null : this.itemAt(item.originRight);
@@ -184,7 +209,10 @@ export class FugueOrderIndex {
     return position;
   }
 
-  /** Rebuild restored records or repair an explicitly invalidated index. */
+  /**
+   * Build the index from `records`, the sequence's records in order. The
+   * index is built afterwards only if the tree reproduces that order.
+   */
   rebuild(records: ReadonlyArray<AugmentedCRDTItem>): void {
     this.rebuilds++;
     this.forcedParentById.clear();
@@ -200,13 +228,12 @@ export class FugueOrderIndex {
       previousPlaceholderId = item.id;
     }
     this.reset(false);
-    this.valid = true;
+    this.built = false;
     const recordIds = new Set(records.map(({ id }) => id));
     const childrenByParent = new Map<ItemKey | null, AugmentedCRDTItem[]>();
     for (const item of records) {
       const parentId = this.fugueParentId(item);
       if (parentId !== null && !recordIds.has(parentId)) {
-        this.valid = false;
         return;
       }
       const children = childrenByParent.get(parentId) ?? [];
@@ -214,19 +241,17 @@ export class FugueOrderIndex {
       childrenByParent.set(parentId, children);
     }
 
+    // Parents go in before their children. No insert needs its rank: the
+    // loop below checks every rank once all records are in.
     const queue = [...(childrenByParent.get(null) ?? [])];
-    let integrated = 0;
     for (let index = 0; index < queue.length; index++) {
       const item = queue[index]!;
-      if (this.integrate(item) === null) {
-        this.valid = false;
-        return;
+      this.integrateInternal(item, false);
+      for (const child of childrenByParent.get(item.id) ?? []) {
+        queue.push(child);
       }
-      integrated++;
-      queue.push(...(childrenByParent.get(item.id) ?? []));
     }
-    if (integrated !== records.length) {
-      this.valid = false;
+    if (queue.length !== records.length) {
       return;
     }
 
@@ -236,15 +261,19 @@ export class FugueOrderIndex {
         node === undefined ||
         this.markerSequence.rankOfVisit(node.markerHandle) !== index
       ) {
-        this.valid = false;
         return;
       }
     }
+    this.built = true;
   }
 
+  /**
+   * Register the right half of a split record. An unbuilt index ignores the
+   * split: building it reads both halves from the sequence.
+   */
   handleRecordSplit(left: AugmentedCRDTItem, right: AugmentedCRDTItem): void {
-    if (!this.valid) {
-      throw new Error("Cannot update an invalid Fugue order index");
+    if (!this.built) {
+      return;
     }
     const leftNode = this.nodesById[left.id];
     if (leftNode === undefined) {
@@ -282,8 +311,9 @@ export class FugueOrderIndex {
     this.nodesById[right.id] = rightNode;
   }
 
+  /** Drop the index; the next {@link integrate} builds it again. */
   invalidate(): void {
-    this.valid = false;
+    this.built = false;
   }
 
   private fugueParentId(item: AugmentedCRDTItem): ItemKey | null {
@@ -317,7 +347,6 @@ export class FugueOrderIndex {
       this.markerOperations = 0;
       this.rotations = 0;
       this.rebuilds = 0;
-      this.valid = true;
     }
   }
 

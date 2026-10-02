@@ -86,35 +86,65 @@ const decodedRuntimeStateCache = new WeakMap<
   NativeSnapshotRuntimeState
 >();
 
+/**
+ * What a replica recorded when it produced a snapshot from its live graph:
+ * the graph as EGW4 bytes, and the header fields and section arrays it was
+ * produced with.
+ */
+interface NativeSnapshotProof {
+  readonly formatVersion: typeof NATIVE_SNAPSHOT_FORMAT_VERSION;
+  readonly text: string;
+  readonly initialText: string;
+  readonly currentVersion: ReadonlyArray<EventId>;
+  readonly eventCount: number;
+  readonly nextSequenceNumber: number;
+  readonly metadata: Record<string, unknown> | undefined;
+  readonly sequenceRecords: ReadonlyArray<EngineSequenceRecord>;
+  readonly deleteTargets: ReadonlyArray<DeleteTargetRecord>;
+  readonly checkpoints: ReadonlyArray<CriticalCheckpointSnapshot>;
+  readonly graphBytes: Uint8Array;
+  /** The snapshot's own lazy `eventGraph` getter. */
+  readonly eventGraphGetter: () => SerializedGraphOutput;
+}
+
+const trustedSnapshots = new WeakMap<NativeSnapshot, NativeSnapshotProof>();
+
+/** The graph section of a validated snapshot, as EGW4 bytes or a graph. */
+type ValidatedNativeSnapshotGraph =
+  | { readonly bytes: Uint8Array; readonly graph?: undefined }
+  | { readonly bytes?: undefined; readonly graph: EventGraph };
+
 export class NativeSnapshotCodec {
+  /**
+   * EGWS1 bytes for a {@link NativeSnapshot}.
+   *
+   * A snapshot that `EgWalkerReplica.createNativeSnapshot` produced in this
+   * process, and that has not been changed since, writes the EGW4 graph the
+   * replica encoded from its live graph. Any other snapshot's `eventGraph`
+   * is rebuilt and checked against its header first.
+   */
   encode(snapshot: NativeSnapshot): Uint8Array {
     const { snapshot: validated, graph } =
-      validateNativeSnapshotWithGraph(snapshot);
-    try {
-      const header = headerFromSnapshot(validated);
-      const graphBytes = graph.encodeTopologicalBinary().binary;
-      const body = new BinaryWriter();
-      body.writeBytes(
-        encodeCompressedSectionIfSmaller(
-          encoder.encode(JSON.stringify(header)),
-        ),
-      );
-      body.writeBytes(encodeCompressedSectionIfSmaller(graphBytes));
-      body.writeBytes(
-        encodeRuntimeState({
-          sequenceRecords: validated.sequenceRecords,
-          deleteTargets: validated.deleteTargets,
-        }),
-      );
+      validateNativeSnapshotWithGraphSection(snapshot);
+    const header = headerFromSnapshot(validated);
+    const graphBytes = graph.bytes ?? encodeValidatedGraph(graph.graph);
+    const body = new BinaryWriter();
+    body.writeBytes(
+      encodeCompressedSectionIfSmaller(encoder.encode(JSON.stringify(header))),
+    );
+    body.writeBytes(encodeCompressedSectionIfSmaller(graphBytes));
+    body.writeBytes(
+      encodeRuntimeState({
+        sequenceRecords: validated.sequenceRecords,
+        deleteTargets: validated.deleteTargets,
+      }),
+    );
 
-      const payload = body.toUint8Array();
-      const out = new Uint8Array(MAGIC_BYTES.byteLength + payload.byteLength);
-      out.set(MAGIC_BYTES, 0);
-      out.set(payload, MAGIC_BYTES.byteLength);
-      return out;
-    } finally {
-      graph.releaseTraversalCaches();
-    }
+    const payload = body.toUint8Array();
+    const out = new Uint8Array(MAGIC_BYTES.byteLength + payload.byteLength);
+    out.set(MAGIC_BYTES, 0);
+    out.set(payload, MAGIC_BYTES.byteLength);
+    return out;
   }
 
   decode(bytes: Uint8Array): NativeSnapshot {
@@ -219,6 +249,106 @@ export const validateGraphMatchesSnapshot = (
   snapshot: NativeSnapshotHeader,
 ): void => {
   validateGraphMatchesHeader(graph, snapshot);
+};
+
+const encodeValidatedGraph = (graph: EventGraph): Uint8Array => {
+  try {
+    return graph.encodeTopologicalBinary().binary;
+  } finally {
+    graph.releaseTraversalCaches();
+  }
+};
+
+/**
+ * @internal A snapshot of live replica state whose graph section is the EGW4
+ * bytes the replica encoded from its live graph. `eventGraph` is decoded
+ * from those bytes only when read, and the codec writes them as they are
+ * while the snapshot keeps the fields it was created with.
+ */
+export const createTrustedNativeSnapshot = (
+  fields: Omit<NativeSnapshot, "eventGraph">,
+  graphBytes: Uint8Array,
+): NativeSnapshot => {
+  let eventGraph: SerializedGraphOutput | null = null;
+  const snapshot: NativeSnapshot = {
+    formatVersion: fields.formatVersion,
+    text: fields.text,
+    initialText: fields.initialText,
+    currentVersion: fields.currentVersion,
+    eventCount: fields.eventCount,
+    nextSequenceNumber: fields.nextSequenceNumber,
+    metadata: fields.metadata,
+    sequenceRecords: fields.sequenceRecords,
+    deleteTargets: fields.deleteTargets,
+    checkpoints: fields.checkpoints,
+    get eventGraph(): SerializedGraphOutput {
+      eventGraph ??= decodeTrustedGraph(
+        graphBytes,
+        fields.eventCount,
+      ).serialize();
+      return eventGraph;
+    },
+  };
+  const eventGraphGetter = Object.getOwnPropertyDescriptor(
+    snapshot,
+    "eventGraph",
+  )!.get as () => SerializedGraphOutput;
+  trustedSnapshots.set(snapshot, {
+    formatVersion: fields.formatVersion,
+    text: fields.text,
+    initialText: fields.initialText,
+    currentVersion: [...fields.currentVersion],
+    eventCount: fields.eventCount,
+    nextSequenceNumber: fields.nextSequenceNumber,
+    metadata: fields.metadata,
+    sequenceRecords: fields.sequenceRecords,
+    deleteTargets: fields.deleteTargets,
+    checkpoints: fields.checkpoints,
+    graphBytes,
+    eventGraphGetter,
+  });
+  return snapshot;
+};
+
+const decodeTrustedGraph = (
+  graphBytes: Uint8Array,
+  eventCount: number,
+): EventGraph =>
+  columnarCodec.decodeBinary(graphBytes, { maxEvents: eventCount });
+
+/**
+ * The proof of a snapshot created by {@link createTrustedNativeSnapshot},
+ * while every field still holds what it was created with. Header values are
+ * compared by value, section arrays and metadata by identity, and
+ * `eventGraph` must still be the snapshot's own getter.
+ */
+const matchingProof = (value: unknown): NativeSnapshotProof | null => {
+  if (value === null || typeof value !== "object") {
+    return null;
+  }
+  const snapshot = value as NativeSnapshot;
+  const proof = trustedSnapshots.get(snapshot);
+  if (proof === undefined) {
+    return null;
+  }
+  const eventGraph = Object.getOwnPropertyDescriptor(snapshot, "eventGraph");
+  return eventGraph?.get === proof.eventGraphGetter &&
+    snapshot.formatVersion === proof.formatVersion &&
+    snapshot.text === proof.text &&
+    snapshot.initialText === proof.initialText &&
+    snapshot.eventCount === proof.eventCount &&
+    snapshot.nextSequenceNumber === proof.nextSequenceNumber &&
+    snapshot.metadata === proof.metadata &&
+    snapshot.sequenceRecords === proof.sequenceRecords &&
+    snapshot.deleteTargets === proof.deleteTargets &&
+    snapshot.checkpoints === proof.checkpoints &&
+    Array.isArray(snapshot.currentVersion) &&
+    snapshot.currentVersion.length === proof.currentVersion.length &&
+    snapshot.currentVersion.every(
+      (id, index) => id === proof.currentVersion[index],
+    )
+    ? proof
+    : null;
 };
 
 const createSnapshotWithLazySections = (
@@ -888,11 +1018,12 @@ const validateNativeSnapshotHeaderRecord = (
   };
 };
 
-const validateNativeSnapshotWithGraph = (
+/** Check every field of a snapshot except its `eventGraph`. */
+const validateNativeSnapshotFields = (
   value: unknown,
 ): {
-  readonly snapshot: NativeSnapshot;
-  readonly graph: EventGraph;
+  readonly record: Record<string, unknown>;
+  readonly fields: Omit<NativeSnapshot, "eventGraph">;
 } => {
   const snapshot = expectRecord(value, "native snapshot");
   const formatVersion = snapshot.formatVersion;
@@ -902,70 +1033,93 @@ const validateNativeSnapshotWithGraph = (
     );
   }
 
-  const text = expectString(snapshot.text, "native snapshot text");
-  const initialText = expectString(
-    snapshot.initialText,
-    "native snapshot initialText",
-  );
-  const currentVersion = expectStringArray(
-    snapshot.currentVersion,
-    "native snapshot currentVersion",
-  );
-  const eventCount = expectNonNegativeInteger(
-    snapshot.eventCount,
-    "native snapshot eventCount",
-  );
-  const nextSequenceNumber = expectNonNegativeInteger(
-    snapshot.nextSequenceNumber,
-    "native snapshot nextSequenceNumber",
-  );
-  const metadata =
-    snapshot.metadata === undefined
-      ? undefined
-      : expectRecord(snapshot.metadata, "native snapshot metadata");
-  const sequenceRecords = expectSequenceRecords(snapshot.sequenceRecords);
-  const deleteTargets = expectDeleteTargets(snapshot.deleteTargets);
-  const checkpoints = expectCheckpoints(snapshot.checkpoints);
-  const eventGraph = expectSerializedGraph(snapshot.eventGraph);
-  const header = {
-    formatVersion,
-    text,
-    initialText,
-    currentVersion,
-    eventCount,
-    nextSequenceNumber,
-    metadata,
-    checkpoints,
-  };
-
-  if (eventGraph.events.length !== eventCount) {
-    throw new Error(
-      `Invalid native snapshot: eventCount ${eventCount} does not match event graph length ${eventGraph.events.length}`,
-    );
-  }
-  const graph = EventGraph.deserialize(eventGraph);
-  validateGraphMatchesHeader(graph, header);
-
   return {
-    snapshot: {
+    record: snapshot,
+    fields: {
       formatVersion,
-      text,
-      initialText,
-      currentVersion,
-      eventCount,
-      nextSequenceNumber,
-      metadata,
-      sequenceRecords,
-      deleteTargets,
-      checkpoints,
-      eventGraph,
+      text: expectString(snapshot.text, "native snapshot text"),
+      initialText: expectString(
+        snapshot.initialText,
+        "native snapshot initialText",
+      ),
+      currentVersion: expectStringArray(
+        snapshot.currentVersion,
+        "native snapshot currentVersion",
+      ),
+      eventCount: expectNonNegativeInteger(
+        snapshot.eventCount,
+        "native snapshot eventCount",
+      ),
+      nextSequenceNumber: expectNonNegativeInteger(
+        snapshot.nextSequenceNumber,
+        "native snapshot nextSequenceNumber",
+      ),
+      metadata:
+        snapshot.metadata === undefined
+          ? undefined
+          : expectRecord(snapshot.metadata, "native snapshot metadata"),
+      sequenceRecords: expectSequenceRecords(snapshot.sequenceRecords),
+      deleteTargets: expectDeleteTargets(snapshot.deleteTargets),
+      checkpoints: expectCheckpoints(snapshot.checkpoints),
     },
-    graph,
   };
 };
 
+/**
+ * Validate a snapshot and its graph section. A snapshot with a matching
+ * proof keeps the EGW4 bytes its replica encoded, so its graph is neither
+ * materialized nor rebuilt; any other snapshot's `eventGraph` is rebuilt
+ * and checked against the header.
+ */
+const validateNativeSnapshotWithGraphSection = (
+  value: unknown,
+): {
+  readonly snapshot: NativeSnapshot;
+  readonly graph: ValidatedNativeSnapshotGraph;
+} => {
+  const proof = matchingProof(value);
+  const { record, fields } = validateNativeSnapshotFields(value);
+  if (proof !== null) {
+    return {
+      snapshot: createTrustedNativeSnapshot(fields, proof.graphBytes),
+      graph: { bytes: proof.graphBytes },
+    };
+  }
+
+  const eventGraph = expectSerializedGraph(record.eventGraph);
+  if (eventGraph.events.length !== fields.eventCount) {
+    throw new Error(
+      `Invalid native snapshot: eventCount ${fields.eventCount} does not match event graph length ${eventGraph.events.length}`,
+    );
+  }
+  const graph = EventGraph.deserialize(eventGraph);
+  validateGraphMatchesHeader(graph, fields);
+
+  return { snapshot: { ...fields, eventGraph }, graph: { graph } };
+};
+
+/**
+ * @internal Validate a snapshot and build its event graph. A snapshot with a
+ * matching proof decodes the EGW4 bytes its replica encoded instead of
+ * rebuilding its `eventGraph` objects.
+ */
+export const validateNativeSnapshotWithGraph = (
+  value: unknown,
+): {
+  readonly snapshot: NativeSnapshot;
+  readonly graph: EventGraph;
+} => {
+  const { snapshot, graph } = validateNativeSnapshotWithGraphSection(value);
+  if (graph.graph !== undefined) {
+    return { snapshot, graph: graph.graph };
+  }
+  const decoded = decodeTrustedGraph(graph.bytes, snapshot.eventCount);
+  validateGraphMatchesHeader(decoded, snapshot);
+  return { snapshot, graph: decoded };
+};
+
 export const validateNativeSnapshot = (value: unknown): NativeSnapshot =>
-  validateNativeSnapshotWithGraph(value).snapshot;
+  validateNativeSnapshotWithGraphSection(value).snapshot;
 
 const expectSequenceRecords = (
   value: unknown,

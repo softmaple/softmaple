@@ -93,11 +93,12 @@ import { readRemoteLinearBatch } from "./internals/remote-linear-batch";
 import {
   consumeDecodedNativeSnapshotGraphSource,
   consumeDecodedNativeSnapshotRuntimeState,
+  createTrustedNativeSnapshot,
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   type NativeSnapshot,
   validateGraphMatchesSnapshot,
-  validateNativeSnapshot,
   validateNativeSnapshotHeaderOnly,
+  validateNativeSnapshotWithGraph,
 } from "./native-snapshot";
 import {
   assertPortableSnapshotMetadata,
@@ -571,6 +572,11 @@ export class EgWalkerReplica {
    * persistent event graph. Existing live/restored resume state is included,
    * but missing transient CRDT state is not rebuilt unless explicitly
    * requested through {@link CreateNativeSnapshotOptions.resumeCache}.
+   *
+   * The graph is encoded once as EGW4, as {@link createPortableSnapshot}
+   * does. `eventGraph` is decoded from those bytes only when read, and
+   * `NativeSnapshotCodec.encode` writes them without revalidating the
+   * graph while the snapshot keeps the fields it was created with.
    */
   createNativeSnapshot(
     options: CreateNativeSnapshotOptions = {},
@@ -588,20 +594,28 @@ export class EgWalkerReplica {
         ? { sequenceRecords: [], deleteTargets: [] }
         : this.engineStateForSnapshot(graph, resumeCache === "rebuild");
 
-    return {
-      formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
-      text: this.getText(),
-      initialText: this.initialText,
-      currentVersion: Array.from(graph.getFrontier()),
-      eventCount: graph.getEventCount(),
-      nextSequenceNumber: this.nextSequenceNumber,
-      metadata: graph.getMetadata(),
-      sequenceRecords: engineState.sequenceRecords,
-      deleteTargets: engineState.deleteTargets,
-      checkpoints:
-        resumeCache === "none" ? [] : this.criticalCheckpoints.toSnapshot(),
-      eventGraph: graph.serialize(),
-    };
+    let encoded: ReturnType<EventGraph["encodeTopologicalBinary"]>;
+    try {
+      encoded = graph.encodeTopologicalBinary();
+    } finally {
+      graph.releaseTraversalCaches();
+    }
+    return createTrustedNativeSnapshot(
+      {
+        formatVersion: NATIVE_SNAPSHOT_FORMAT_VERSION,
+        text: this.getText(),
+        initialText: this.initialText,
+        currentVersion: [...encoded.frontier],
+        eventCount: graph.getEventCount(),
+        nextSequenceNumber: this.nextSequenceNumber,
+        metadata: graph.getMetadata(),
+        sequenceRecords: engineState.sequenceRecords,
+        deleteTargets: engineState.deleteTargets,
+        checkpoints:
+          resumeCache === "none" ? [] : this.criticalCheckpoints.toSnapshot(),
+      },
+      encoded.binary,
+    );
   }
 
   /**
@@ -683,12 +697,11 @@ export class EgWalkerReplica {
     const validated =
       graphSource === undefined
         ? (() => {
-            const fullSnapshot = validateNativeSnapshot(snapshot);
-            sequenceRecords = fullSnapshot.sequenceRecords;
-            deleteTargets = fullSnapshot.deleteTargets;
-            graph = EventGraph.deserialize(fullSnapshot.eventGraph);
-            validateGraphMatchesSnapshot(graph, fullSnapshot);
-            return fullSnapshot;
+            const full = validateNativeSnapshotWithGraph(snapshot);
+            sequenceRecords = full.snapshot.sequenceRecords;
+            deleteTargets = full.snapshot.deleteTargets;
+            graph = full.graph;
+            return full.snapshot;
           })()
         : (() => {
             lazyEventGraph = (): EventGraph => {

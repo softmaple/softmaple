@@ -199,6 +199,24 @@ node scripts/run-snapshot-first-edit-bench.mjs \
   --output /path/to/results
 ```
 
+## Native snapshot encode
+
+`scripts/run-native-snapshot-encode-bench.mjs` times each step of writing an
+EGWS1 snapshot from a replica cold-loaded from a decoded EGW4 graph:
+`createNativeSnapshot()` + `NativeSnapshotCodec.encode`, `graph.serialize()`,
+`EventGraph.deserialize()`, `encodeTopologicalBinary()` alone, and the
+portable create + encode for comparison. Every sample runs in a fresh
+process, alternating implementation order between runs; the native bytes are
+then decoded and restored, the restored text is checked against the
+dataset's final text, and a restore that replays history fails the run.
+
+```bash
+node scripts/run-native-snapshot-encode-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --datasets S1,S3,C1,A2 --runs 3
+```
+
 ## Concurrent-edit burst
 
 `concurrent-burst-bench` opens a paper dataset and applies a burst of

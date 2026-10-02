@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   NATIVE_SNAPSHOT_FORMAT_VERSION,
   NativeSnapshotCodec,
+  type NativeSnapshot,
 } from "../core/native-snapshot";
 import { EgWalkerReplica } from "../core/replica";
 import { REPLAY_SOURCE } from "../constants/replay-source";
@@ -17,6 +18,7 @@ import {
 import { EventGraph } from "../graph/event-graph";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { BinaryReader, BinaryWriter } from "../graph/internals/binary-io";
+import type { EventId } from "../types";
 
 describe("EgWalkerReplica native snapshots", () => {
   it("should restore readable document state without replaying history", () => {
@@ -966,6 +968,150 @@ describe("EgWalkerReplica native snapshots", () => {
     // Act / Assert
     expect(() => EgWalkerReplica.fromNativeSnapshot(snapshot, "alice")).toThrow(
       "Invalid native snapshot: currentVersion does not match event graph frontier",
+    );
+  });
+
+  it("should encode a replica's snapshot without rebuilding its event graph", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "Hello");
+    replica.insert(5, " world");
+    replica.delete(0, 1);
+    const codec = new NativeSnapshotCodec();
+    const deserialize = vi.spyOn(EventGraph, "deserialize");
+    const serialize = vi.spyOn(EventGraph.prototype, "serialize");
+
+    try {
+      // Act
+      const bytes = codec.encode(
+        replica.createNativeSnapshot({ resumeCache: "rebuild" }),
+      );
+      const restored = EgWalkerReplica.fromNativeSnapshot(
+        codec.decode(bytes),
+        "alice",
+      );
+      restored.insert(restored.getText().length, "!");
+
+      // Assert
+      expect(deserialize).not.toHaveBeenCalled();
+      expect(serialize).not.toHaveBeenCalled();
+      expect(restored.getText()).toBe("ello world!");
+      expect(restored.getReplayStats().fullReplays).toBe(0);
+    } finally {
+      deserialize.mockRestore();
+      serialize.mockRestore();
+    }
+  });
+
+  it("should keep the history a snapshot was created with after later edits", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "AB");
+    const snapshot = replica.createNativeSnapshot();
+    replica.insert(2, "C");
+    const codec = new NativeSnapshotCodec();
+
+    // Act
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      codec.decode(codec.encode(snapshot)),
+      "alice",
+    );
+
+    // Assert
+    expect(snapshot.eventGraph.events).toHaveLength(1);
+    expect(snapshot.eventGraph.version).toEqual(snapshot.currentVersion);
+    expect(restored.getText()).toBe("AB");
+    expect(restored.getFrontier()).toEqual(new Set(snapshot.currentVersion));
+  });
+
+  it("should read a replica snapshot's eventGraph as the serialized live graph", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "AB");
+    replica.delete(0, 1);
+    const expected = replica.serialize().eventGraph;
+
+    // Act
+    const snapshot = replica.createNativeSnapshot();
+    const copy = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+
+    // Assert
+    expect(snapshot.eventGraph).toEqual(expected);
+    expect(copy.eventGraph).toEqual(expected);
+  });
+
+  it("should restore an in-memory replica snapshot without rebuilding its event graph", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "AB");
+    const snapshot = replica.createNativeSnapshot({ resumeCache: "none" });
+    const deserialize = vi.spyOn(EventGraph, "deserialize");
+
+    try {
+      // Act
+      const restored = EgWalkerReplica.fromNativeSnapshot(snapshot, "alice");
+      restored.insert(2, "C");
+
+      // Assert
+      expect(deserialize).not.toHaveBeenCalled();
+      expect(restored.getText()).toBe("ABC");
+    } finally {
+      deserialize.mockRestore();
+    }
+  });
+
+  it("should fully validate a replica snapshot whose fields were changed", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "A");
+    const codec = new NativeSnapshotCodec();
+    const reassigned = replica.createNativeSnapshot() as {
+      -readonly [Key in keyof NativeSnapshot]: NativeSnapshot[Key];
+    };
+    reassigned.eventCount = 2;
+    const mutatedVersion = replica.createNativeSnapshot();
+    (mutatedVersion.currentVersion as EventId[])[0] = "missing";
+
+    // Act / Assert
+    expect(() => codec.encode(reassigned)).toThrow(
+      "Invalid native snapshot: eventCount 2 does not match event graph length 1",
+    );
+    expect(() => codec.encode(mutatedVersion)).toThrow(
+      "Invalid native snapshot: currentVersion does not match event graph frontier",
+    );
+  });
+
+  it("should reject a malformed event graph in a snapshot built outside the replica", () => {
+    // Arrange
+    const replica = new EgWalkerReplica("alice", "");
+    replica.insert(0, "AB");
+    const snapshot = replica.createNativeSnapshot();
+    const { events, version } = snapshot.eventGraph;
+    const codec = new NativeSnapshotCodec();
+    const missingParent: NativeSnapshot = {
+      ...snapshot,
+      eventGraph: {
+        version,
+        events: events.map((event) => ({
+          ...event,
+          parentVersion: ["unknown:0"],
+        })),
+      },
+    };
+    const invalidOperation = {
+      ...snapshot,
+      eventGraph: {
+        version,
+        events: events.map((event) => ({
+          ...event,
+          operation: { type: "move", index: 0 },
+        })),
+      },
+    } as unknown as NativeSnapshot;
+
+    // Act / Assert
+    expect(() => codec.encode(missingParent)).toThrow(/unknown:0/);
+    expect(() => codec.encode(invalidOperation)).toThrow(
+      "Invalid native snapshot operation type: move",
     );
   });
 

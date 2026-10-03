@@ -1040,3 +1040,98 @@ describe("EgWalkerEngine transformed deletes", () => {
     expect(totalDeleted).toBe(4);
   });
 });
+
+describe("EgWalkerEngine fragmentation counters", () => {
+  it("should count every record split", () => {
+    // Arrange: bob inserts inside alice's typed run, then carol inside its
+    // left half.
+    const events: GraphEvent[] = [
+      ...typedEvents("alice", 0, "abcd"),
+      insertEvent("bob:0", ["alice:3"], 2, "x"),
+      insertEvent("carol:0", ["bob:0"], 1, "y"),
+    ];
+
+    // Act
+    const generated = new EgWalkerEngine().generate(events);
+
+    // Assert
+    expect(generated.text).toBe("aybxcd");
+    expect(generated.stats.recordSplitCount).toBe(2);
+  });
+
+  it("should count one prepare toggle per record a transition moves", () => {
+    // Arrange: bob's insert retreats alice's three keystrokes, which share
+    // one record, and the merge advances them again.
+    const events: GraphEvent[] = [
+      ...typedEvents("alice", 0, "abc"),
+      insertEvent("bob:0", [], 0, "x"),
+      insertEvent("merge:0", ["alice:2", "bob:0"], 0, "!"),
+    ];
+
+    // Act
+    const generated = new EgWalkerEngine().generate(events, "", {
+      eventOrder: events,
+    });
+
+    // Assert
+    expect(generated.stats.retreatCount).toBe(3);
+    expect(generated.stats.advanceCount).toBe(3);
+    expect(generated.stats.prepareToggleCount).toBe(2);
+  });
+
+  it("should count segmented placeholder operations within the tree operations", () => {
+    // Arrange: a deferred replay of 64 events keeps the initial text in a
+    // segmented placeholder, which the last event deletes from.
+    const typed = typedEvents("alice", 11, "x".repeat(63));
+    const events: GraphEvent[] = [
+      ...typed,
+      {
+        id: "alice:63",
+        parentVersion: new Set([typed.at(-1)!.id]),
+        operation: { type: OPERATION_TYPE.DELETE, index: 0, length: 5 },
+        timestamp: 63,
+      },
+    ];
+
+    // Act
+    const generated = new EgWalkerEngine().generate(events, "hello world", {
+      collectTransformedOperations: false,
+    });
+
+    // Assert
+    expect(generated.text).toBe(` world${"x".repeat(63)}`);
+    expect(generated.stats.placeholderStructuralOperations).toBeGreaterThan(0);
+    expect(generated.stats.placeholderStructuralOperations).toBeLessThanOrEqual(
+      generated.stats.sequenceTreeOperations,
+    );
+  });
+});
+
+// Helpers
+
+const insertEvent = (
+  id: EventId,
+  parents: ReadonlyArray<EventId>,
+  index: number,
+  text: string,
+): GraphEvent => ({
+  id,
+  parentVersion: new Set(parents),
+  operation: { type: OPERATION_TYPE.INSERT, index, text },
+  timestamp: 0,
+});
+
+/** `replica` types `text` one character per event, from `index` on. */
+const typedEvents = (
+  replica: string,
+  index: number,
+  text: string,
+): GraphEvent[] =>
+  [...text].map((character, offset) =>
+    insertEvent(
+      `${replica}:${offset}`,
+      offset === 0 ? [] : [`${replica}:${offset - 1}`],
+      index + offset,
+      character,
+    ),
+  );

@@ -96,6 +96,17 @@ integration position. The record splits where a later insert or delete
 lands. Concurrent or divergent events still fall back to the full
 prepare/effect replay path; both paths produce identical output.
 
+A one-character insert from a canonical `replicaId:sequence` author is
+appended to the typed-run record it lands right after when that record is
+the same author's, ends at the previous sequence number, is visible and was
+never deleted, has no right origin, and is no record's left origin. Then the
+run stands for exactly the items one record per keystroke would hold: each
+appended character's left origin is the one before it and its right origin
+is null, as a split of the run gives back, and the integration scan would
+stop at the first record after the run, whatever follows it. So typing keeps
+one record per stretch of an author's keystrokes anywhere in the document,
+not only at its end, and a retreat or advance toggles such a stretch at once.
+
 When the range is not empty, `applyInsert` runs the scan within the engine's
 probe budget, `DEFAULT_INTEGRATION_SCAN_BUDGET`: 32 probes plus 2 for each
 sequence record since the engine's last reset. On the paper traces nearly

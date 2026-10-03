@@ -138,6 +138,12 @@ describe("native-only paper benchmark", () => {
     expect(result.stdout).toMatch(/nativeLoadArrayBufferBytes=-?\d+/);
     expect(result.stdout).toMatch(/nativeTotalArrayBufferBytes=-?\d+/);
     expect(result.stdout).toMatch(/rssAfterLoadBytes=\d+/);
+    // The fixture is one author's typing, which replays without the engine.
+    expect(result.stdout).toContain(
+      "engineEvents=0 recordSplits=0 prepareToggles=0 placeholderOperations=0 eventsPerPeakRecord=0 eventsPerToggle=0",
+    );
     expect(result.stdout).toContain("paper-bench-native-summary dataset=S1");
+    expect(result.stdout).toMatch(/medianNativeDecodeMs=\d/);
+    expect(result.stdout).toMatch(/medianNativeLoadMs=\d/);
   });
 });

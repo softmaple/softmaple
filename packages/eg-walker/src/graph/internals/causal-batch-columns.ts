@@ -240,7 +240,14 @@ export class CausalBatchColumns {
 
   /** Materialize only at object API boundaries and for small warm batches. */
   eventAt(offset: number): GraphEvent {
-    const explicit = this.explicit.indexOf(offset);
+    let low = 0;
+    let high = this.explicit.length;
+    while (low < high) {
+      const middle = low + Math.floor((high - low) / 2);
+      if (this.explicit[middle]! < offset) low = middle + 1;
+      else high = middle;
+    }
+    const explicit = this.explicit[low] === offset ? low : -1;
     const parents = new Set<EventId>();
     if (explicit >= 0) {
       for (

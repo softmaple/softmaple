@@ -56,6 +56,29 @@ describe("CausalEventBatchBuilder", () => {
     );
   });
 
+  it("materializes sparse parent overrides and the chain events between them", () => {
+    const parents = [
+      [],
+      ["a:0"],
+      ["external:0"],
+      ["a:2"],
+      ["a:0", "a:3"],
+      ["a:4"],
+      [],
+      ["a:6"],
+    ];
+    const builder = createCausalEventBatchBuilder();
+    parents.forEach((eventParents, offset) => {
+      builder.appendInsert(`a:${offset}`, eventParents, 0, "a", offset);
+    });
+    const columns = inspectCausalEventBatch(builder.finish());
+    for (const offset of [7, 0, 4, 1, 6, 3, 2, 5]) {
+      expect(columns.eventAt(offset).parentVersion).toEqual(
+        new Set(parents[offset]),
+      );
+    }
+  });
+
   it.each([
     { name: "an empty batch", parents: [], exactChain: true },
     { name: "one root", parents: [[]], exactChain: true },

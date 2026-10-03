@@ -45,7 +45,10 @@ const batch = (events: GraphEvent[]) => {
 };
 
 describe("compacted event columns", () => {
-  it("keeps sealed columns resident after keystroke reads and tail repacking", () => {
+  it.each([
+    true,
+    false,
+  ])("reads sealed keystrokes by index (ID runs: %s)", (idRuns) => {
     const columns = new CausalBatchColumns(3);
     for (let index = 0; index < 3; index++) {
       columns.append(
@@ -58,7 +61,14 @@ describe("compacted event columns", () => {
       );
     }
     columns.finish();
-    const base = columns.packedBase();
+    const idIndex = columns.ids.view();
+    if (!idRuns) vi.spyOn(idIndex, "canonicalRunAt").mockReturnValue(undefined);
+    const base = PackedEventGraphBase.create({
+      idIndex,
+      ...columns.operationColumns(),
+      insertedContent: columns.insertedContent,
+      runs: columns.packedBase().runs,
+    });
     const expected = Array.from(base.iterateEvents());
     const sealed = new SealedOperationColumns(columns.operationColumns());
     base.compactOperations(sealed);
@@ -70,7 +80,7 @@ describe("compacted event columns", () => {
     expect(run).toEqual({ agent: 0, sequence: 0, limit: 3 });
     expect(base.keystrokeRunAt(2, -1, -1, run)).toBe(true);
     expect(run).toEqual({ agent: 0, sequence: 2, limit: -1 });
-    expect(materialize).toHaveBeenCalledTimes(2);
+    expect(materialize).not.toHaveBeenCalled();
     expect(base.operationIndexAt(1)).toBe(1);
     expect(readIndex).toHaveBeenCalledWith(1);
 
@@ -84,7 +94,7 @@ describe("compacted event columns", () => {
     tail.append(event.id, 0, 3, event.operation, event.timestamp, [2]);
     const repacked = base.appendTail(tail);
     expect(Array.from(repacked.iterateEvents())).toEqual([...expected, event]);
-    expect(materialize).toHaveBeenCalledTimes(3);
+    expect(materialize).toHaveBeenCalledTimes(1);
     readIndex.mockClear();
     expect(base.operationIndexAt(2)).toBe(2);
     expect(readIndex).toHaveBeenCalledWith(2);

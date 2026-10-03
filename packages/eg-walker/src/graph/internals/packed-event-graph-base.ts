@@ -514,11 +514,7 @@ export class PackedEventGraphBase {
     direction: 1 | -1,
     run: PackedKeystrokeRun,
   ): boolean {
-    const { operationTypes, operationLengths } = this.operations();
-    if (
-      operationTypes[offset] !== INSERT_OPERATION ||
-      operationLengths[offset] !== 1
-    ) {
+    if (!this.isInsertAt(offset) || this.operationLengthAt(offset) !== 1) {
       return false;
     }
     const idRun = this.idIndex.canonicalRunAt?.(offset);
@@ -532,8 +528,8 @@ export class PackedEventGraphBase {
     let scan = offset + direction;
     while (
       scan !== runLimit &&
-      operationTypes[scan] === INSERT_OPERATION &&
-      operationLengths[scan] === 1
+      this.isInsertAt(scan) &&
+      this.operationLengthAt(scan) === 1
     ) {
       scan += direction;
     }
@@ -554,14 +550,13 @@ export class PackedEventGraphBase {
     if (agent < 0) {
       return false;
     }
-    const { operationTypes, operationLengths } = this.operations();
     const firstSequence = this.idIndex.sequenceAt(offset);
     let sequence = firstSequence;
     let scan = offset + direction;
     while (
       scan !== limit &&
-      operationTypes[scan] === INSERT_OPERATION &&
-      operationLengths[scan] === 1 &&
+      this.isInsertAt(scan) &&
+      this.operationLengthAt(scan) === 1 &&
       this.idIndex.agentAt(scan) === agent &&
       this.idIndex.sequenceAt(scan) === sequence + direction
     ) {

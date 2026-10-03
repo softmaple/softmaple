@@ -3,12 +3,12 @@ import type { EventId, ExternalOperation } from "../../types";
 import type { AgentTable } from "./agent-table";
 import { CUSTOM_AGENT, EventIdRunIndex } from "./event-id-run-index";
 import type { PackedTailEvents } from "./packed-event-graph-base";
+import { SpanColumn } from "./span-column";
 
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
 const INITIAL_CAPACITY = 16;
 const EMPTY_UINT8 = new Uint8Array(0);
-const EMPTY_UINT32 = new Uint32Array(0);
 const EMPTY_INT32 = new Int32Array(0);
 const INT32_MAX = 0x7fff_ffff;
 const INT32_MIN = -0x8000_0000;
@@ -33,9 +33,9 @@ export const NO_RANK = -1;
 /**
  * Events appended after an event graph's packed prefix, stored as columns.
  *
- * Every field of an event is copied into typed columns when it is appended:
- * its ID into an {@link EventIdRunIndex}, its operation into numeric columns
- * and a chunked text store, and its parents as insertion ranks. No
+ * Every field of an event is copied when it is appended: its ID into an
+ * {@link EventIdRunIndex}, its operation into numeric spans and a chunked
+ * text store, and its parents as insertion ranks. No
  * `GraphEvent`, operation object, parent `Set` or ID string is retained, so a
  * local keystroke costs a few dozen bytes instead of several hundred.
  *
@@ -49,10 +49,20 @@ export class TailEventLog implements PackedTailEvents {
   // Columns start as shared empty arrays: `ensureCapacity` replaces them
   // before any write, so a graph that never appends allocates none.
   private types = EMPTY_UINT8;
-  private indexes: Uint32Array | Float64Array = EMPTY_UINT32;
-  private lengths: Uint32Array | Float64Array = EMPTY_UINT32;
-  private timestamps: Int32Array | Float64Array = EMPTY_INT32;
-  private insertStarts = EMPTY_UINT32;
+  private readonly indexes = new SpanColumn();
+  private readonly lengths = new SpanColumn();
+  private readonly timestamps = new SpanColumn();
+  private readonly insertStarts = new SpanColumn();
+  private wideIndexes = false;
+  private wideLengths = false;
+  private wideTimestamps = false;
+
+  get hasWideUnsignedColumns(): boolean {
+    return this.wideIndexes || this.wideLengths;
+  }
+  get hasWideTimestamps(): boolean {
+    return this.wideTimestamps;
+  }
   /**
    * `-1` for a root, a sole parent's rank, or `-2 - start` for an event whose
    * parents are the block at `start` in {@link multiParentRanks}.
@@ -100,6 +110,15 @@ export class TailEventLog implements PackedTailEvents {
     return this.text.length;
   }
 
+  /** Remove adjacency/type growth slack after a large receive. */
+  trimCapacity(): void {
+    if (this.capacity === this.eventCount) return;
+    this.types = this.types.slice(0, this.eventCount);
+    this.parents = this.parents.slice(0, this.eventCount);
+    this.children = this.children.slice(0, this.eventCount);
+    this.capacity = this.eventCount;
+  }
+
   /**
    * Append one event and return its tail index.
    *
@@ -133,6 +152,7 @@ export class TailEventLog implements PackedTailEvents {
     } catch (error) {
       this.irregular?.delete(tailIndex);
       this.ids.truncate(tailIndex);
+      this.truncateColumns(tailIndex);
       throw error;
     }
 
@@ -176,7 +196,7 @@ export class TailEventLog implements PackedTailEvents {
         multiParentLength = decodeList(parent);
       }
       if (textLength === null && this.types[tailIndex] === INSERT_OPERATION) {
-        textLength = this.insertStarts[tailIndex]!;
+        textLength = this.insertStarts.at(tailIndex);
       }
       const child = this.children[tailIndex]!;
       if (child < NO_RANK) {
@@ -197,6 +217,7 @@ export class TailEventLog implements PackedTailEvents {
       }
     }
     this.ids.truncate(count);
+    this.truncateColumns(count);
     this.eventCount = count;
   }
 
@@ -238,24 +259,24 @@ export class TailEventLog implements PackedTailEvents {
 
   operationIndexAt(tailIndex: number): number {
     this.assertIndex(tailIndex);
-    return this.indexes[tailIndex]!;
+    return this.indexes.at(tailIndex);
   }
 
   operationLengthAt(tailIndex: number): number {
     this.assertIndex(tailIndex);
-    return this.lengths[tailIndex]!;
+    return this.lengths.at(tailIndex);
   }
 
   /** Offset of an insert's text in the log's inserted content. */
   insertStartAt(tailIndex: number): number {
     this.assertIndex(tailIndex);
-    return this.insertStarts[tailIndex]!;
+    return this.insertStarts.at(tailIndex);
   }
 
   timestampAt(tailIndex: number): number {
     this.assertIndex(tailIndex);
     return (
-      this.irregular?.get(tailIndex)?.timestamp ?? this.timestamps[tailIndex]!
+      this.irregular?.get(tailIndex)?.timestamp ?? this.timestamps.at(tailIndex)
     );
   }
 
@@ -274,10 +295,10 @@ export class TailEventLog implements PackedTailEvents {
     if (irregular !== undefined) {
       return { ...irregular.operation };
     }
-    const index = this.indexes[tailIndex]!;
-    const length = this.lengths[tailIndex]!;
+    const index = this.indexes.at(tailIndex);
+    const length = this.lengths.at(tailIndex);
     if (this.types[tailIndex] === INSERT_OPERATION) {
-      const start = this.insertStarts[tailIndex]!;
+      const start = this.insertStarts.at(tailIndex);
       return {
         type: OPERATION_TYPE.INSERT,
         index,
@@ -288,20 +309,34 @@ export class TailEventLog implements PackedTailEvents {
   }
 
   /**
-   * The typed operation columns of every event, as views that the next
-   * append may invalidate, or `null` while an irregular event is stored.
+   * Materialize operation columns for a full repack, or return `null` while
+   * an irregular event is stored. Suffix replay reads the spans directly.
    */
   operationColumns(): TailOperationColumns | null {
     if (this.hasIrregularEvents()) {
       return null;
     }
     const count = this.eventCount;
+    const indexes = this.wideIndexes
+      ? new Float64Array(count)
+      : new Uint32Array(count);
+    const lengths = this.wideLengths
+      ? new Float64Array(count)
+      : new Uint32Array(count);
+    const timestamps = this.wideTimestamps
+      ? new Float64Array(count)
+      : new Int32Array(count);
+    const insertStarts = new Uint32Array(count);
+    this.indexes.copyTo(indexes);
+    this.lengths.copyTo(lengths);
+    this.timestamps.copyTo(timestamps);
+    this.insertStarts.copyTo(insertStarts);
     return {
       types: this.types.subarray(0, count),
-      indexes: this.indexes.subarray(0, count),
-      lengths: this.lengths.subarray(0, count),
-      timestamps: this.timestamps.subarray(0, count),
-      insertStarts: this.insertStarts.subarray(0, count),
+      indexes,
+      lengths,
+      timestamps,
+      insertStarts,
     };
   }
 
@@ -588,15 +623,12 @@ export class TailEventLog implements PackedTailEvents {
     if (required <= this.capacity) {
       return;
     }
-    const capacity = Math.max(INITIAL_CAPACITY, this.capacity * 2, required);
+    const capacity = Math.max(
+      INITIAL_CAPACITY,
+      Math.ceil(this.capacity * 1.25),
+      required,
+    );
     this.types = grow(this.types, new Uint8Array(capacity));
-    this.indexes = growUnsigned(this.indexes, capacity);
-    this.lengths = growUnsigned(this.lengths, capacity);
-    this.timestamps =
-      this.timestamps instanceof Int32Array
-        ? grow(this.timestamps, new Int32Array(capacity))
-        : grow(this.timestamps, new Float64Array(capacity));
-    this.insertStarts = grow(this.insertStarts, new Uint32Array(capacity));
     this.parents = grow(this.parents, new Int32Array(capacity));
     this.children = grow(this.children, new Int32Array(capacity));
     this.capacity = capacity;
@@ -627,10 +659,7 @@ export class TailEventLog implements PackedTailEvents {
         throw new Error("Inserted content exceeds packed UTF-16 offset range");
       }
       this.types[tailIndex] = INSERT_OPERATION;
-      this.writeUnsigned("indexes", tailIndex, index);
-      this.writeUnsigned("lengths", tailIndex, text.length);
-      this.insertStarts[tailIndex] = start;
-      this.writeTimestamp(tailIndex, timestamp);
+      this.appendNumbers(index, text.length, timestamp, start);
       this.text.append(text);
       return;
     }
@@ -641,10 +670,7 @@ export class TailEventLog implements PackedTailEvents {
       typeof candidate.length === "number"
     ) {
       this.types[tailIndex] = DELETE_OPERATION;
-      this.writeUnsigned("indexes", tailIndex, index);
-      this.writeUnsigned("lengths", tailIndex, candidate.length);
-      this.insertStarts[tailIndex] = 0;
-      this.writeTimestamp(tailIndex, timestamp);
+      this.appendNumbers(index, candidate.length, timestamp, 0);
       return;
     }
     // Keep a malformed event verbatim. Its columns read as an empty delete
@@ -655,32 +681,36 @@ export class TailEventLog implements PackedTailEvents {
     });
     this.types[tailIndex] =
       type === OPERATION_TYPE.INSERT ? INSERT_OPERATION : DELETE_OPERATION;
-    this.writeUnsigned("indexes", tailIndex, Number.NaN);
-    this.writeUnsigned("lengths", tailIndex, Number.NaN);
-    this.insertStarts[tailIndex] = this.text.length;
-    this.writeTimestamp(tailIndex, Number.NaN);
+    this.appendNumbers(Number.NaN, Number.NaN, Number.NaN, this.text.length);
   }
 
-  private writeUnsigned(
-    column: "indexes" | "lengths",
-    tailIndex: number,
-    value: number,
+  private appendNumbers(
+    index: number,
+    length: number,
+    timestamp: number,
+    insertStart: number,
   ): void {
-    let target = this[column];
-    if (target instanceof Uint32Array && !fitsUint32(value)) {
-      target = grow(target, new Float64Array(this.capacity));
-      this[column] = target;
-    }
-    target[tailIndex] = value;
+    if (!this.wideIndexes && !fitsUint32(index)) this.wideIndexes = true;
+    if (!this.wideLengths && !fitsUint32(length)) this.wideLengths = true;
+    if (
+      !this.wideTimestamps &&
+      (!Number.isInteger(timestamp) ||
+        timestamp < INT32_MIN ||
+        timestamp > INT32_MAX ||
+        Object.is(timestamp, -0))
+    )
+      this.wideTimestamps = true;
+    this.indexes.append(index);
+    this.lengths.append(length);
+    this.timestamps.append(timestamp);
+    this.insertStarts.append(insertStart);
   }
 
-  private writeTimestamp(tailIndex: number, timestamp: number): void {
-    let target = this.timestamps;
-    if (target instanceof Int32Array && !fitsInt32(timestamp)) {
-      target = grow(target, new Float64Array(this.capacity));
-      this.timestamps = target;
-    }
-    target[tailIndex] = timestamp;
+  private truncateColumns(count: number): void {
+    this.indexes.truncate(count);
+    this.lengths.truncate(count);
+    this.timestamps.truncate(count);
+    this.insertStarts.truncate(count);
   }
 }
 
@@ -794,17 +824,10 @@ class ChunkedTextStore {
   }
 }
 
-/** Whether a typed column stores `value` exactly, including `-0`. */
 const fitsUint32 = (value: number): boolean =>
   Number.isInteger(value) &&
   value >= 0 &&
   value <= UINT32_MAX &&
-  !Object.is(value, -0);
-
-const fitsInt32 = (value: number): boolean =>
-  Number.isInteger(value) &&
-  value >= INT32_MIN &&
-  value <= INT32_MAX &&
   !Object.is(value, -0);
 
 const encodeList = (start: number): number => {
@@ -830,11 +853,3 @@ const grow = <T extends Column>(source: Column, target: T): T => {
   target.set(source.subarray(0, Math.min(source.length, target.length)));
   return target;
 };
-
-const growUnsigned = (
-  column: Uint32Array | Float64Array,
-  capacity: number,
-): Uint32Array | Float64Array =>
-  column instanceof Uint32Array
-    ? grow(column, new Uint32Array(capacity))
-    : grow(column, new Float64Array(capacity));

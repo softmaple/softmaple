@@ -19,6 +19,7 @@ import type {
   PackedIntegerColumn,
   PackedUnsignedIntegerColumn,
 } from "./packed-numeric-columns";
+import type { SealedOperationColumns } from "./sealed-operation-columns";
 
 const INT32_MIN = -0x8000_0000;
 const INT32_MAX = 0x7fff_ffff;
@@ -456,6 +457,7 @@ export interface PackedLinearChainMark {
 export class PackedLinearChain {
   /** Contiguous columns for the chain's first `contiguous.count` events. */
   private contiguous = new OperationColumnStore(0, 0);
+  private sealedBase: PackedEventGraphBase | null = null;
   /** Events after the contiguous prefix, in order. */
   private chunks: OperationColumnStore[] = [];
   private insertedContent = "";
@@ -518,6 +520,15 @@ export class PackedLinearChain {
       this.rollbackTo(mark);
       throw error;
     }
+  }
+
+  /** Release the dense owner along with the latest base's dense views. */
+  compactOperations(sealed?: SealedOperationColumns): void {
+    if (this.base === null) return;
+    this.base.compactOperations(sealed);
+    this.sealedBase = this.base;
+    this.contiguous = new OperationColumnStore(0, 0);
+    this.chunks = [];
   }
 
   get count(): number {
@@ -735,6 +746,12 @@ export class PackedLinearChain {
   private operationColumns(count: number): PackedOperationColumns {
     if (count > this.eventCount) {
       throw new Error("Packed linear chain was rolled back below this base");
+    }
+    if (this.sealedBase !== null) {
+      this.contiguous = OperationColumnStore.adopt(
+        this.sealedBase.materializeOperations(),
+      );
+      this.sealedBase = null;
     }
     const contiguous = this.contiguous;
     if (contiguous.count < count) {

@@ -84,8 +84,13 @@ has a few different engineering boundaries:
 - The replica retains its replay engine for fast incremental edits and keeps up
   to 32 materialized critical checkpoints. The paper permits discarding this
   internal CRDT state at critical versions.
-- The ordinary in-memory event graph is an object graph. The binary columnar
-  representation is used at the codec boundary, not as the live query engine.
+- The live event graph uses a packed prefix and an appendable columnar tail.
+  Tail numeric columns seal every 1,024 events into constant-step spans, with
+  literal blocks for irregular values. Large causal batches prepare the same
+  resident representation in `finish()` and transfer it after receive commits;
+  replay uses dense columns until then. Random reads decode individual spans,
+  suffix replay reads only its suffix, and full repacking can materialize dense
+  columns again. The EGW4 wire format is unchanged.
 - Concurrent inserts are placed by the paper's linear scan, within a budget
   of two probes per sequence record. A scan that would overrun it builds
   `FugueOrderIndex`, which places every later insert of that replay in

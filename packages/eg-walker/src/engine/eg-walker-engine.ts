@@ -196,6 +196,7 @@ export class EgWalkerEngine {
     deleteTargets: this.deleteTargets,
     nextPlaceholderSerial: () => this.placeholderCounter++,
     onRecordSplit: (left, right) => {
+      this.recordSplitCount++;
       if (!this.useLinearIntegrationOracle) {
         this.fugueOrder.handleRecordSplit(left, right);
       }
@@ -217,6 +218,13 @@ export class EgWalkerEngine {
   private peakSequenceRecordCount = 0;
   private placeholderCounter = 0;
   private integrationProbeCount = 0;
+  private recordSplitCount = 0;
+  private prepareToggleCount = 0;
+  /**
+   * Offset that continues the placeholder operation count from the figure
+   * {@link restoreStats} restored; the live segmented states count the rest.
+   */
+  private restoredPlaceholderStructuralOperations = 0;
   private useLinearIntegrationOracle = false;
   private integrationScanBudget: IntegrationScanBudget =
     DEFAULT_INTEGRATION_SCAN_BUDGET;
@@ -502,31 +510,13 @@ export class EgWalkerEngine {
     }
 
     const textBuffer = this.resultingText;
-    const fugueStats = this.fugueOrder.getStats();
     return {
       get text(): string {
         return textBuffer.toString();
       },
       textBuffer,
       transformedOperations: transformedOperations ?? [],
-      stats: {
-        retreatCount: this.retreatCount,
-        advanceCount: this.advanceCount,
-        eventsProcessed: this.processedEventCount,
-        nonConflictingRunCount: this.nonConflictingRunCount,
-        fullReplayCount: this.fullReplayCount,
-        sequenceRecordCount: this.items.size,
-        peakSequenceRecordCount: this.peakSequenceRecordCount,
-        integrationProbeCount: this.integrationProbeCount,
-        fugueComparisons: fugueStats.comparisons,
-        fugueMarkerOperations: fugueStats.markerOperations,
-        fugueRotations: fugueStats.rotations,
-        fugueRebuilds: fugueStats.rebuilds,
-        sequenceTreeOperations:
-          this.sequence.getStructuralOperationCount() +
-          fugueStats.markerTreeOperations +
-          this.segmentedPlaceholderStructuralOperationCount(),
-      },
+      stats: this.getStats(),
     };
   }
 
@@ -819,6 +809,11 @@ export class EgWalkerEngine {
         this.sequence.getStructuralOperationCount() +
         fugueStats.markerTreeOperations +
         this.segmentedPlaceholderStructuralOperationCount(),
+      recordSplitCount: this.recordSplitCount,
+      prepareToggleCount: this.prepareToggleCount,
+      placeholderStructuralOperations:
+        this.restoredPlaceholderStructuralOperations +
+        this.segmentedPlaceholderStructuralOperationCount(),
     };
   }
 
@@ -843,6 +838,11 @@ export class EgWalkerEngine {
       rebuilds: stats.fugueRebuilds,
     });
     this.sequence.restoreStructuralOperationCount(stats.sequenceTreeOperations);
+    this.recordSplitCount = stats.recordSplitCount;
+    this.prepareToggleCount = stats.prepareToggleCount;
+    this.restoredPlaceholderStructuralOperations =
+      stats.placeholderStructuralOperations -
+      this.segmentedPlaceholderStructuralOperationCount();
   }
 
   getSequenceRecords(): EngineSequenceRecord[] {
@@ -1044,6 +1044,9 @@ export class EgWalkerEngine {
       : state.graph.expandVersion(state.currentVersion).size;
     this.peakSequenceRecordCount = items.length;
     this.integrationProbeCount = 0;
+    this.recordSplitCount = 0;
+    this.prepareToggleCount = 0;
+    this.restoredPlaceholderStructuralOperations = 0;
     this.useLinearIntegrationOracle = false;
     this.integrationScanBudget = DEFAULT_INTEGRATION_SCAN_BUDGET;
     this.integrationScanProbes = 0;
@@ -1190,11 +1193,12 @@ export class EgWalkerEngine {
    * ID through the run interval and RecordSplitter materializes interior
    * anchors only if a later branch or delete needs them.
    *
-   * The batch path must mirror {@link applyInsert}'s empty-conflict-region
-   * gate: a concurrent retreated sibling can sit after the tail without
-   * becoming `tail.originRight`, and scalar coalescing refuses to extend in
-   * that case. Requiring {@link IndexedSequence.isLast} keeps deferred
-   * typed-run spans identical to eager per-event records.
+   * The batch path must mirror {@link applyInsert}'s coalescing gate, so
+   * that deferred typed-run spans stay identical to eager per-event records:
+   * the tail has no right origin, and {@link canExtendTypedRun} holds for
+   * the whole suffix. Like the scalar path, the tail may sit anywhere in the
+   * document: each keystroke lands right after the one before, whatever
+   * follows it in the sequence.
    */
   private extendObjectInsertRun(
     localVersions: ReadonlyArray<number>,
@@ -1208,8 +1212,7 @@ export class EgWalkerEngine {
       tail === null ||
       typeof tail.content !== "string" ||
       !tail.run ||
-      tail.originRight !== null ||
-      !this.sequence.isLast(tail)
+      tail.originRight !== null
     ) {
       return startEventIndex;
     }
@@ -1667,6 +1670,7 @@ export class EgWalkerEngine {
    * scalar run gate validates the whole author interval. The final-span check
    * is load-bearing: a prepare-position proof alone cannot rule out a
    * previously registered successor run after nonlinear replay and splits.
+   * As in {@link applyInsert}, the tail may sit anywhere in the document.
    */
   private extendPackedInsertRun(
     plan: PackedCriticalReplayPlan,
@@ -1679,8 +1683,7 @@ export class EgWalkerEngine {
       tail === null ||
       typeof tail.content !== "string" ||
       !tail.run ||
-      tail.originRight !== null ||
-      !this.sequence.isLast(tail)
+      tail.originRight !== null
     ) {
       return startOrderIndex;
     }
@@ -1980,6 +1983,9 @@ export class EgWalkerEngine {
     this.processedEventCount = 0;
     this.peakSequenceRecordCount = 0;
     this.integrationProbeCount = 0;
+    this.recordSplitCount = 0;
+    this.prepareToggleCount = 0;
+    this.restoredPlaceholderStructuralOperations = 0;
     this.useLinearIntegrationOracle =
       options.integrationMode === "linear-oracle";
     this.integrationScanBudget =
@@ -2237,6 +2243,7 @@ export class EgWalkerEngine {
    */
   private togglePrepareState(item: AugmentedCRDTItem, delta: 1 | -1): void {
     item.prepareState += delta;
+    this.prepareToggleCount++;
     this.sequence.refreshInBatch(item);
   }
 
@@ -2378,6 +2385,7 @@ export class EgWalkerEngine {
       return;
     }
     this.pendingPlaceholderState = null;
+    this.prepareToggleCount++;
     for (const slice of state.adjustPrepareRange(
       this.pendingPlaceholderStart,
       this.pendingPlaceholderEnd,

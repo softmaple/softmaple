@@ -193,64 +193,75 @@ export const applyInsert = (
 
   // Section 3.4 "smaller" lever: typed-run coalescing.
   //
-  // When a single-character INSERT lands at the right boundary of an
-  // adjacent typed-run record from the same author whose run extends by
-  // exactly one sequence number, append to that record's content instead
-  // of allocating a new CRDT item. The columnar codec already groups
-  // events into id-runs by (replicaId, contiguous sequence) for wire
-  // encoding; mirroring that grouping in the ranked B-tree collapses a
-  // 20k-character linear single-author trace to ~1 record (down from one
-  // per code unit) while leaving multi-author / multi-event ordering
-  // unchanged — split-on-demand carves the run when a concurrent insert
-  // or delete anchors inside it.
+  // A single-character INSERT that lands right after a typed-run record
+  // from the same author, with the next sequence number, is appended to
+  // that record's content instead of allocating a new CRDT item. The
+  // columnar codec already groups events into id-runs by (replicaId,
+  // contiguous sequence) for wire encoding; mirroring that grouping in the
+  // ranked B-tree collapses one author's typing to one record per stretch
+  // of keystrokes instead of one per code unit, wherever in the document it
+  // happens. Split-on-demand carves the run when a concurrent insert or
+  // delete anchors inside it.
+  //
+  // The extension is exact. A typed run stands for a chain of one-character
+  // items in which each character after the first has the one before it as
+  // its left origin and the run's right origin as its right origin; a split
+  // gives the right half exactly those origins (RecordSplitter). The
+  // inserted character's own origins match them:
+  //
+  // - its left origin is the run's last character, since it lands at the
+  //   end of the run;
+  // - no record has the run as its left origin (canExtendTypedRun), so no
+  //   record is a sibling of the insert and its right origin is null, as
+  //   the run's must be;
+  // - its integration scan would stop at the first record after the run:
+  //   a record of the prepare view ends the scan, and a concurrent record
+  //   there has a left origin before the run. So it lands right after the
+  //   run whatever follows the run in the sequence.
   const canonical = agent >= 0;
-  const coalescingBoundary = knownBoundary
-    ? originLeftRecord !== undefined && sequence.isLast(originLeftRecord)
-    : originLeftPosition !== null &&
-      originLeftPosition === firstInsertPosition - 1;
+  const landsAfterOriginLeft =
+    knownBoundary ||
+    (originLeftPosition !== null &&
+      originLeftPosition === firstInsertPosition - 1);
   if (
-    conflictRegionEmpty &&
     insertedText.length === 1 &&
     canonical &&
-    coalescingBoundary
+    landsAfterOriginLeft &&
+    originLeftRecord !== undefined &&
+    originLeftRecord.originRight === null &&
+    canExtendTypedRun(
+      originLeftRecord,
+      agent,
+      eventSequence,
+      insertedText.length,
+      deps,
+    )
   ) {
-    const leftRecord = originLeftRecord;
-    if (
-      leftRecord !== undefined &&
-      canExtendTypedRun(
-        leftRecord,
-        agent,
-        eventSequence,
-        insertedText.length,
-        deps,
-      )
-    ) {
-      const effectIndex = applyTypedRunExtension(
-        leftRecord,
-        insertedText,
-        deps,
-        deferTextMaterialization,
-      );
-      if (tailResult !== undefined) {
-        tailResult.item = leftRecord;
-      }
-      if (deferTextMaterialization) {
-        return NO_TRANSFORMED_OPERATIONS;
-      }
-      if (effectIndex === null) {
-        throw new Error("Typed-run extension did not produce an effect index");
-      }
-
-      return collectTransformedOperations
-        ? [
-            {
-              type: OPERATION_TYPE.INSERT,
-              index: effectIndex,
-              text: insertedText,
-            },
-          ]
-        : NO_TRANSFORMED_OPERATIONS;
+    const effectIndex = applyTypedRunExtension(
+      originLeftRecord,
+      insertedText,
+      deps,
+      deferTextMaterialization,
+    );
+    if (tailResult !== undefined) {
+      tailResult.item = originLeftRecord;
     }
+    if (deferTextMaterialization) {
+      return NO_TRANSFORMED_OPERATIONS;
+    }
+    if (effectIndex === null) {
+      throw new Error("Typed-run extension did not produce an effect index");
+    }
+
+    return collectTransformedOperations
+      ? [
+          {
+            type: OPERATION_TYPE.INSERT,
+            index: effectIndex,
+            text: insertedText,
+          },
+        ]
+      : NO_TRANSFORMED_OPERATIONS;
   }
 
   // The whole insert becomes one record with the origins of its first code

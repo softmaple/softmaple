@@ -1456,6 +1456,11 @@ export class EgWalkerReplica {
    *   the engine's own peak resets on every partial/full replay engine swap,
    *   so we max in {@link replicaPeakSequenceRecordCount} (the peak captured
    *   from prior engines) here.
+   * - `engineEventsProcessed`, `recordSplitCount`, `prepareToggleCount` and
+   *   `placeholderStructuralOperations` describe the state the replay engines
+   *   built (see {@link EngineStats}). With the record counts, they show how
+   *   fragmented that state is: how many events each record holds, and how
+   *   many events a transition moves per record it toggles.
    */
   getReplayStats(): {
     /** Successful cold portable-snapshot text validations, separate from live replays. */
@@ -1484,6 +1489,11 @@ export class EgWalkerReplica {
     readonly fugueRotations: number;
     readonly fugueRebuilds: number;
     readonly sequenceTreeOperations: number;
+    /** Events the replay engines replayed: the nonlinear part of a cold replay. */
+    readonly engineEventsProcessed: number;
+    readonly recordSplitCount: number;
+    readonly prepareToggleCount: number;
+    readonly placeholderStructuralOperations: number;
   } {
     const liveEngineStats = this.engine?.getStats();
     const engineStats = this.engineStatsOverride ?? liveEngineStats;
@@ -1521,6 +1531,11 @@ export class EgWalkerReplica {
       fugueRotations: engineStats?.fugueRotations ?? 0,
       fugueRebuilds: engineStats?.fugueRebuilds ?? 0,
       sequenceTreeOperations: engineStats?.sequenceTreeOperations ?? 0,
+      engineEventsProcessed: engineStats?.eventsProcessed ?? 0,
+      recordSplitCount: engineStats?.recordSplitCount ?? 0,
+      prepareToggleCount: engineStats?.prepareToggleCount ?? 0,
+      placeholderStructuralOperations:
+        engineStats?.placeholderStructuralOperations ?? 0,
     };
   }
 
@@ -3774,6 +3789,11 @@ const mergeEngineStats = (
     fugueRebuilds: aggregate.fugueRebuilds + next.fugueRebuilds,
     sequenceTreeOperations:
       aggregate.sequenceTreeOperations + next.sequenceTreeOperations,
+    recordSplitCount: aggregate.recordSplitCount + next.recordSplitCount,
+    prepareToggleCount: aggregate.prepareToggleCount + next.prepareToggleCount,
+    placeholderStructuralOperations:
+      aggregate.placeholderStructuralOperations +
+      next.placeholderStructuralOperations,
   };
 };
 

@@ -5,6 +5,7 @@ import { REPLAY_SOURCE } from "../constants/replay-source";
 import { CriticalCheckpointStore } from "../core/internals/critical-checkpoint-store";
 import { EgWalkerReplica } from "../core/replica";
 import { CriticalVersionAnalyzer } from "../engine/critical-version";
+import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
 import type { GraphEvent } from "../types";
 
@@ -314,4 +315,61 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
       );
     });
   });
+
+  describe("replay-state shape counters", () => {
+    it("are zero after a cold replay of a linear history", () => {
+      // Arrange
+      const graph = pack(buildLinearHistory(20));
+
+      // Act
+      const stats = new EgWalkerReplica("r1", "", graph).getReplayStats();
+
+      // Assert
+      expect(stats).toMatchObject({
+        engineEventsProcessed: 0,
+        recordSplitCount: 0,
+        prepareToggleCount: 0,
+        placeholderStructuralOperations: 0,
+      });
+    });
+
+    it("report the replay engine's work in a cold replay of concurrent edits", () => {
+      // Arrange: carol's edit is concurrent with every other event, so the
+      // whole history is one nonlinear section; bob's insert splits alice's
+      // typed run.
+      const graph = pack([
+        ...buildLinearHistory(3),
+        {
+          id: "bob:0",
+          parentVersion: new Set(["alice:2"]),
+          operation: { type: OPERATION_TYPE.INSERT, index: 1, text: "y" },
+          timestamp: 3,
+        },
+        {
+          id: "carol:0",
+          parentVersion: new Set(),
+          operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "z" },
+          timestamp: 4,
+        },
+      ]);
+
+      // Act
+      const replica = new EgWalkerReplica("r1", "", graph);
+      const stats = replica.getReplayStats();
+
+      // Assert
+      expect(replica.getText()).toBe("xyxxz");
+      expect(stats.engineEventsProcessed).toBe(5);
+      expect(stats.recordSplitCount).toBe(1);
+      expect(stats.prepareToggleCount).toBeGreaterThan(0);
+    });
+  });
 });
+
+// Helpers
+
+/** `events` decoded from EGW4 bytes, so that a replica replays them packed. */
+const pack = (events: ReadonlyArray<GraphEvent>): EventGraph => {
+  const codec = new ColumnarEventGraphCodec();
+  return codec.decodeBinary(codec.encodeBinary(EventGraph.fromEvents(events)));
+};

@@ -152,6 +152,23 @@ export interface EngineStats {
   readonly fugueRotations: number;
   readonly fugueRebuilds: number;
   readonly sequenceTreeOperations: number;
+  /**
+   * Records split in two: where a concurrent insert or delete lands inside a
+   * run-length record, or where a retreat or advance isolates part of one.
+   */
+  readonly recordSplitCount: number;
+  /**
+   * Prepare-state changes made by retreat and advance: one per record, or
+   * per range of a segmented placeholder, however many events it covers.
+   * `retreatCount + advanceCount` per toggle is how many events a
+   * transition moves at once.
+   */
+  readonly prepareToggleCount: number;
+  /**
+   * Structural operations of segmented placeholders, which
+   * {@link sequenceTreeOperations} also counts.
+   */
+  readonly placeholderStructuralOperations: number;
 }
 
 export interface GenerateOptions {

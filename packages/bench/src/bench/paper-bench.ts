@@ -208,6 +208,11 @@ interface NativeBenchResult {
   readonly fugueRotations: number;
   readonly fugueRebuilds: number;
   readonly sequenceTreeOperations: number;
+  /** Events the replay engines replayed: the nonlinear part of the history. */
+  readonly engineEvents: number;
+  readonly recordSplits: number;
+  readonly prepareToggles: number;
+  readonly placeholderOperations: number;
 }
 
 interface PreparedNativeBench {
@@ -752,9 +757,23 @@ const printNativeResult = (result: NativeBenchResult): void => {
       `fugueRotations=${result.fugueRotations}`,
       `fugueRebuilds=${result.fugueRebuilds}`,
       `sequenceTreeOperations=${result.sequenceTreeOperations}`,
+      `engineEvents=${result.engineEvents}`,
+      `recordSplits=${result.recordSplits}`,
+      `prepareToggles=${result.prepareToggles}`,
+      `placeholderOperations=${result.placeholderOperations}`,
+      `eventsPerPeakRecord=${formatNumber(
+        ratio(result.engineEvents, result.peakSequenceRecords),
+      )}`,
+      `eventsPerToggle=${formatNumber(
+        ratio(result.retreats + result.advances, result.prepareToggles),
+      )}`,
     ].join(" "),
   );
 };
+
+/** `numerator / denominator`, or 0 when there is nothing to divide by. */
+const ratio = (numerator: number, denominator: number): number =>
+  denominator === 0 ? 0 : numerator / denominator;
 
 const printMemoryResult = (result: MemoryResult): void => {
   console.log(
@@ -998,6 +1017,10 @@ const runNativeDatasetOnce = (
     fugueRotations: stats.fugueRotations,
     fugueRebuilds: stats.fugueRebuilds,
     sequenceTreeOperations: stats.sequenceTreeOperations,
+    engineEvents: stats.engineEventsProcessed,
+    recordSplits: stats.recordSplitCount,
+    prepareToggles: stats.prepareToggleCount,
+    placeholderOperations: stats.placeholderStructuralOperations,
   };
 };
 
@@ -1709,6 +1732,14 @@ const runNativeOnlyWorkerProcess = (
 const mean = (values: ReadonlyArray<number>): number =>
   values.reduce((sum, value) => sum + value, 0) / values.length;
 
+const median = (values: ReadonlyArray<number>): number => {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]!
+    : (sorted[middle - 1]! + sorted[middle]!) / 2;
+};
+
 const printNativeSummaries = (
   results: ReadonlyArray<NativeBenchResult>,
 ): void => {
@@ -1736,9 +1767,11 @@ const printNativeSummaries = (
         `binaryBytes=${first.binaryBytes}`,
         `finalTextValidated=${datasetResults.every((result) => result.finalTextValidated)}`,
         `meanNativeDecodeMs=${formatNumber(mean(decodeTimes))}`,
+        `medianNativeDecodeMs=${formatNumber(median(decodeTimes))}`,
         `minNativeDecodeMs=${formatNumber(Math.min(...decodeTimes))}`,
         `maxNativeDecodeMs=${formatNumber(Math.max(...decodeTimes))}`,
         `meanNativeLoadMs=${formatNumber(mean(loadTimes))}`,
+        `medianNativeLoadMs=${formatNumber(median(loadTimes))}`,
         `minNativeLoadMs=${formatNumber(Math.min(...loadTimes))}`,
         `maxNativeLoadMs=${formatNumber(Math.max(...loadTimes))}`,
         `meanNativeMaterializeMs=${formatNumber(mean(materializeTimes))}`,
@@ -1838,18 +1871,10 @@ const medianLatency = (
   results: ReadonlyArray<ApplyBenchResult>,
   percentile: (latency: ApplyCallLatency) => number,
 ): number | undefined => {
-  const values = results
-    .flatMap((result) =>
-      result.callLatency === null ? [] : [percentile(result.callLatency)],
-    )
-    .sort((left, right) => left - right);
-  if (values.length === 0) {
-    return undefined;
-  }
-  const middle = Math.floor(values.length / 2);
-  return values.length % 2 === 1
-    ? values[middle]
-    : (values[middle - 1]! + values[middle]!) / 2;
+  const values = results.flatMap((result) =>
+    result.callLatency === null ? [] : [percentile(result.callLatency)],
+  );
+  return values.length === 0 ? undefined : median(values);
 };
 
 const formatLatency = (ms: number | undefined): string =>

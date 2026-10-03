@@ -342,6 +342,31 @@ Important output fields:
 - `portableSnapshot*HeapBytes` / `nativeSnapshot*HeapBytes`: separate memory
   deltas from the explicit memory worker.
 
+The `--native-only` lane also describes the temporary CRDT state a cold replay
+builds, so that a change in `nativeLoadMs` can be traced to the shape of that
+state:
+
+- `engineEvents`: events the replay engines replayed, the nonlinear part of
+  the history. Linear sections replay straight into the rope and count none.
+- `sequenceRecords` / `peakSequenceRecords`: live and peak records of the
+  ranked sequence.
+- `recordSplits`: records split in two, where an insert or delete lands inside
+  a run-length record or a retreat or advance isolates part of one.
+- `retreats` / `advances`: events that transitions moved. `prepareToggles`:
+  the records, or segmented placeholder ranges, whose prepare state they
+  changed.
+- `sequenceTreeOperations`: structural operations of the ranked sequence, the
+  Fugue index and segmented placeholders; `placeholderOperations` is the
+  placeholder share.
+- `eventsPerPeakRecord`: `engineEvents / peakSequenceRecords`. It falls as
+  records fragment, for example when each keystroke keeps its own record.
+- `eventsPerToggle`: `(retreats + advances) / prepareToggles`, the events a
+  transition moves per record it toggles.
+
+The summary line reports each timing's median next to its mean, minimum and
+maximum (`medianNativeDecodeMs`, `medianNativeLoadMs`). Compare builds by
+median.
+
 Do not use full `--datasets all` as the first routine check. Full `C1` and
 `C2` are currently dominated by replay cost. Use bounded concurrent/asynchronous
 smoke tests first:

@@ -626,13 +626,16 @@ export class PackedEventGraphBase {
   }
 
   private operations(): PackedOperationColumns {
-    return this.operationColumns ?? this.loadDeferredOperations();
+    // Dense views of sealed columns are temporary; reads keep the compact owner.
+    return (
+      this.operationColumns ??
+      this.sealedOperations?.materialize() ??
+      this.loadDeferredOperations()
+    );
   }
 
   private loadDeferredOperations(): PackedOperationColumns {
-    const columns =
-      this.sealedOperations?.materialize() ?? this.loadOperationColumns!();
-    this.sealedOperations = null;
+    const columns = this.loadOperationColumns!();
     assertOperationColumnLengths(columns, this.eventCount);
     this.operationColumns = columns;
     return columns;

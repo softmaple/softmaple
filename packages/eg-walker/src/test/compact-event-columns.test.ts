@@ -4,7 +4,10 @@ import { EgWalkerReplica } from "../core/replica";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
 import { EventGraph } from "../graph/event-graph";
 import { CausalBatchColumns } from "../graph/internals/causal-batch-columns";
+import { PackedEventGraphBase } from "../graph/internals/packed-event-graph-base";
+import { SealedOperationColumns } from "../graph/internals/sealed-operation-columns";
 import { SpanColumn } from "../graph/internals/span-column";
+import { TailEventLog } from "../graph/internals/tail-event-log";
 import type { GraphEvent } from "../types";
 
 const chain = (start: number, count: number): GraphEvent[] =>
@@ -42,6 +45,74 @@ const batch = (events: GraphEvent[]) => {
 };
 
 describe("compacted event columns", () => {
+  it("keeps sealed columns resident after keystroke reads and tail repacking", () => {
+    const columns = new CausalBatchColumns(3);
+    for (let index = 0; index < 3; index++) {
+      columns.append(
+        `a:${index}`,
+        index === 0 ? [] : [`a:${index - 1}`],
+        index,
+        "x",
+        1,
+        index,
+      );
+    }
+    columns.finish();
+    const base = columns.packedBase();
+    const expected = Array.from(base.iterateEvents());
+    const sealed = new SealedOperationColumns(columns.operationColumns());
+    base.compactOperations(sealed);
+    const materialize = vi.spyOn(sealed, "materialize");
+    const readIndex = vi.spyOn(sealed.indexes, "at");
+    const run = { agent: -1, sequence: -1, limit: -1 };
+
+    expect(base.keystrokeRunAt(0, 3, 1, run)).toBe(true);
+    expect(run).toEqual({ agent: 0, sequence: 0, limit: 3 });
+    expect(base.keystrokeRunAt(2, -1, -1, run)).toBe(true);
+    expect(run).toEqual({ agent: 0, sequence: 2, limit: -1 });
+    expect(materialize).toHaveBeenCalledTimes(2);
+    expect(base.operationIndexAt(1)).toBe(1);
+    expect(readIndex).toHaveBeenCalledWith(1);
+
+    const tail = new TailEventLog(base.agents);
+    const event: GraphEvent = {
+      id: "a:3",
+      parentVersion: new Set(["a:2"]),
+      operation: { type: "insert", index: 3, text: "y" },
+      timestamp: 3,
+    };
+    tail.append(event.id, 0, 3, event.operation, event.timestamp, [2]);
+    const repacked = base.appendTail(tail);
+    expect(Array.from(repacked.iterateEvents())).toEqual([...expected, event]);
+    expect(materialize).toHaveBeenCalledTimes(3);
+    readIndex.mockClear();
+    expect(base.operationIndexAt(2)).toBe(2);
+    expect(readIndex).toHaveBeenCalledWith(2);
+  });
+
+  it("validates deferred columns before caching a successful load", () => {
+    const columns = new CausalBatchColumns(1);
+    columns.append("a:0", [], 0, "x", 1, 1);
+    columns.finish();
+    const dense = columns.operationColumns();
+    const load = vi
+      .fn()
+      .mockReturnValueOnce({ ...dense, operationIndexes: new Uint32Array(0) })
+      .mockReturnValue(dense);
+    const base = PackedEventGraphBase.create({
+      idIndex: columns.ids.view(),
+      insertedContent: columns.insertedContent,
+      runs: columns.packedBase().runs,
+      loadOperationColumns: load,
+    });
+
+    expect(load).not.toHaveBeenCalled();
+    expect(() => base.operationIndexAt(0)).toThrow("column length mismatch");
+    expect(base.operationIndexAt(0)).toBe(0);
+    expect(base.timestampAt(0)).toBe(1);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves wide columns and missing timestamp lookups across sealing", () => {
     const columns = new CausalBatchColumns(1_025);
     for (let index = 0; index < 1_025; index++) {

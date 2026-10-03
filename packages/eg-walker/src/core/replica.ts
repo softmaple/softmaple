@@ -115,7 +115,6 @@ import {
 import {
   consumeCausalEventBatch,
   inspectCausalEventBatch,
-  isExactCausalChain,
   type CausalEventBatch,
 } from "./causal-event-batch";
 
@@ -1031,16 +1030,14 @@ export class EgWalkerReplica {
    * retried after its missing prerequisite is installed.
    */
   applyCausalBatch(batch: CausalEventBatch): void {
-    // The batch's builder created these event objects and no public API
-    // returns them, so the graph adopts them below without a copy.
-    const events = inspectCausalEventBatch(batch);
+    const columns = inspectCausalEventBatch(batch);
     const graph = this.ensureEventGraph();
     if (this.ensureRemoteEvents().pendingCount !== 0) {
       throw new Error(
         "Cannot apply a causal batch while remote events are pending",
       );
     }
-    if (events.length === 0) {
+    if (columns.count === 0) {
       consumeCausalEventBatch(batch);
       return;
     }
@@ -1050,34 +1047,25 @@ export class EgWalkerReplica {
     const eventCountBeforeBatch = graph.getEventCount();
 
     try {
-      const firstParents = events[0]!.parentVersion;
-      if (
-        isExactCausalChain(batch) &&
-        versionsEqual(firstParents, this.currentVersion)
-      ) {
-        // The builder validated every field, so an exact chain goes straight
-        // into packed columns and replays from them. The general graph path
-        // is left for a graph that is not one packed chain, or for
-        // timestamps packed columns cannot hold.
-        const packed = graph.canAppendLinearEvents(firstParents)
-          ? graph.appendLinearEvents(events)
-          : null;
-        if (packed !== null) {
-          this.applyLinearBatch(packed, eventCountBeforeBatch);
-        } else {
-          for (const event of events) {
-            graph.addOwnedEvent(event);
-          }
-          this.applyLinearBatch(
-            linearBatchFromOwnedEvents(events),
-            eventCountBeforeBatch,
-          );
-        }
+      const extendsCurrent =
+        columns.exactChain &&
+        versionsEqual(columns.eventAt(0).parentVersion, this.currentVersion);
+      graph.appendCausalColumns(columns);
+      if (extendsCurrent) {
+        this.applyLinearBatch(columns, eventCountBeforeBatch);
       } else {
-        for (const event of events) {
-          graph.addOwnedEvent(event);
-        }
-        if (!this.tryApplyWarmBatch(events, graph)) {
+        // Only the bounded warm path needs wrappers. Cold replay reads the
+        // adopted columns directly, including for non-linear histories.
+        const warm =
+          this.engine !== null &&
+          columns.count <= MAX_WARM_BATCH_EVENTS &&
+          this.tryApplyWarmBatch(
+            Array.from({ length: columns.count }, (_, offset) =>
+              columns.eventAt(offset),
+            ),
+            graph,
+          );
+        if (!warm) {
           this.engineStatsOverride = null;
           const checkpoint = this.criticalCheckpoints.pickFor(graph);
           if (checkpoint === null) {
@@ -3424,32 +3412,6 @@ const toPositionOperation = (
     index: operation.index,
     length: operation.length,
   };
-};
-
-/** Copy a causal builder's exact chain into columns. */
-const linearBatchFromOwnedEvents = (
-  events: ReadonlyArray<GraphEvent>,
-): LinearEventBatch => {
-  const batch = new LinearEventBatch(events[0]!.parentVersion);
-  for (const event of events) {
-    const operation = event.operation;
-    if (operation.type === OPERATION_TYPE.INSERT) {
-      batch.appendInsert(
-        event.id,
-        operation.index,
-        operation.text,
-        event.timestamp,
-      );
-    } else {
-      batch.appendDelete(
-        event.id,
-        operation.index,
-        operation.length,
-        event.timestamp,
-      );
-    }
-  }
-  return batch.finish();
 };
 
 /** Build the graph's own event object for one event of a linear batch. */

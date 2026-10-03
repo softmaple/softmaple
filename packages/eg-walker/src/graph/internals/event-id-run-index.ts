@@ -540,51 +540,20 @@ export class EventIdRunIndexView {
   }
 }
 
-const COLON = 58;
-const DIGIT_ZERO = 48;
-const DIGIT_NINE = 57;
-const MAX_SAFE_SEQUENCE_DIGITS = 16;
-
 /**
  * Return whether `id` is exactly `${run.replicaId}:${next}`, where `next` is
- * the sequence after `run`, and the run may grow to hold it. The check parses
- * the suffix before comparing the prefix and allocates nothing.
+ * the sequence after `run`, and the run may grow to hold it. Native string
+ * comparison is faster here than scanning each digit of the incoming ID;
+ * the temporary expected ID is never retained by the index.
  */
 const extendsRun = (id: EventId, run: EventIdRun): boolean => {
-  if (run.custom) {
-    return false;
-  }
+  if (run.custom) return false;
   const next = run.startSequence + run.length;
-  if (next >= run.sequenceLimit || next > Number.MAX_SAFE_INTEGER) {
-    return false;
-  }
-  const prefixLength = run.replicaId.length;
-  const digitsStart = prefixLength + 1;
-  const digitCount = id.length - digitsStart;
-  if (
-    digitCount <= 0 ||
-    digitCount > MAX_SAFE_SEQUENCE_DIGITS ||
-    id.charCodeAt(prefixLength) !== COLON
-  ) {
-    return false;
-  }
-  let codeUnit = id.charCodeAt(digitsStart);
-  if (
-    codeUnit < DIGIT_ZERO ||
-    codeUnit > DIGIT_NINE ||
-    (codeUnit === DIGIT_ZERO && digitCount !== 1)
-  ) {
-    return false;
-  }
-  let sequence = codeUnit - DIGIT_ZERO;
-  for (let index = digitsStart + 1; index < id.length; index++) {
-    codeUnit = id.charCodeAt(index);
-    if (codeUnit < DIGIT_ZERO || codeUnit > DIGIT_NINE) {
-      return false;
-    }
-    sequence = sequence * 10 + (codeUnit - DIGIT_ZERO);
-  }
-  return sequence === next && id.startsWith(run.replicaId);
+  return (
+    next < run.sequenceLimit &&
+    next <= Number.MAX_SAFE_INTEGER &&
+    id === `${run.replicaId}:${next}`
+  );
 };
 
 const containsOffset = (run: EventIdRun, offset: number): boolean =>

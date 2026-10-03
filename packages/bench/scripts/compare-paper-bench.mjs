@@ -1,23 +1,23 @@
 /** Run fixed before/after bundles sequentially; each sample gets a fresh process. */
 import process from "node:process";
 import console from "node:console";
-import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import { performance } from "node:perf_hooks";
+import { runBenchmarkProcess } from "./run-benchmark-process.mjs";
 
 const [before, after, paperRoot, output, lane = "apply", runsArg = "3"] =
   process.argv.slice(2);
 if (!before || !after || !paperRoot || !output)
   throw new Error(
-    "usage: compare-paper-bench.mjs <before.mjs> <after.mjs> <paper-root> <output-dir> [apply|persistence] [runs]",
+    "usage: compare-paper-bench.mjs <before.mjs> <after.mjs> <paper-root> <output-dir> [apply|apply-all|native|persistence] [runs]",
   );
 const directory = resolve(output);
 mkdirSync(directory, { recursive: true });
 const runs = Number(runsArg);
 if (!Number.isSafeInteger(runs) || runs < 1) throw new Error("invalid runs");
-if (lane !== "apply" && lane !== "persistence")
+if (!["apply", "apply-all", "native", "persistence"].includes(lane))
   throw new Error("invalid lane");
 for (const dataset of ["S1", "S2", "S3", "C1", "C2", "A1", "A2"]) {
   const failedVersions = new Set();
@@ -37,16 +37,18 @@ for (const dataset of ["S1", "S2", "S3", "C1", "C2", "A1", "A2"]) {
         "--runs",
         "1",
         "--apply-batch-events",
-        "4096",
-        ...(lane === "apply" ? ["--apply-only", "--apply-api", "causal"] : []),
+        lane === "apply-all" ? "all" : "4096",
+        ...(lane === "apply" || lane === "apply-all"
+          ? ["--apply-only", "--apply-api", "causal"]
+          : []),
+        ...(lane === "native" ? ["--native-only"] : []),
       ];
       console.log(`START ${name}`);
       const start = performance.now();
-      const result = spawnSync(
-        "timeout",
-        ["--kill-after=5s", "600s", process.execPath, ...command],
-        { encoding: "utf8", timeout: 610_000, maxBuffer: 16 * 1024 * 1024 },
-      );
+      const result = await runBenchmarkProcess(process.execPath, command, {
+        timeout: 600_000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
       writeFileSync(
         join(directory, `${name}.log`),
         `${result.stdout ?? ""}${result.stderr ?? ""}`,

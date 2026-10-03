@@ -87,7 +87,12 @@ const mergedUnicodeTrace: PaperTrace = {
 const inspectBatches = (
   batches: ReturnType<typeof convertPaperTraceToCausalBatches>["batches"],
 ): GraphEvent[] =>
-  batches.flatMap((batch) => [...inspectCausalEventBatch(batch)]);
+  batches.flatMap((batch) => {
+    const columns = inspectCausalEventBatch(batch);
+    return Array.from({ length: columns.count }, (_, offset) =>
+      columns.eventAt(offset),
+    );
+  });
 
 describe("paper trace causal batches", () => {
   it("matches the established atomic event conversion", () => {

@@ -382,7 +382,7 @@ describe("applyCausalBatch on an exact chain", () => {
     expect(packedTailEvents(replica)).toBe(0);
   });
 
-  it("keeps events with fractional timestamps in the object tail", () => {
+  it("preserves fractional timestamps in adopted columns", () => {
     const events = typing("a", 0, null, 0, "ab").map((event, index) => ({
       ...event,
       timestamp: index + 0.5,
@@ -395,7 +395,7 @@ describe("applyCausalBatch on an exact chain", () => {
     expect(replica.exportEventGraph().map((event) => event.timestamp)).toEqual([
       0.5, 1.5,
     ]);
-    expect(packedTailEvents(replica)).toBe(2);
+    expect(packedTailEvents(replica)).toBe(0);
   });
 });
 

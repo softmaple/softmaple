@@ -19,6 +19,7 @@ import {
   type PackedOffsetTransition,
   PackedDiffVersionsWorkspace,
 } from "./packed-diff-versions";
+import { SealedOperationColumns } from "./sealed-operation-columns";
 
 const INSERT_OPERATION = 1;
 const DELETE_OPERATION = 2;
@@ -167,6 +168,7 @@ export class PackedEventGraphBase {
   private readonly eventCount: number;
   /** `null` until {@link loadOperationColumns} supplies deferred columns. */
   private operationColumns: PackedOperationColumns | null;
+  private sealedOperations: SealedOperationColumns | null = null;
   private readonly loadOperationColumns: (() => PackedOperationColumns) | null;
   private readonly insertedContent: string;
   /** Edges as runs; an event's parents are read through its run. */
@@ -452,18 +454,18 @@ export class PackedEventGraphBase {
       id,
       operation: this.operationAt(offset),
       parentVersion: new Set(this.iterateParentsAt(offset)),
-      timestamp: this.operations().timestamps[offset]!,
+      timestamp: this.timestampAt(offset)!,
     };
   }
 
   operationAt(offset: number): ExternalOperation {
-    const { operationTypes, operationIndexes, operationLengths, insertStarts } =
-      this.operations();
-    const type = operationTypes[offset];
-    const index = operationIndexes[offset]!;
-    const length = operationLengths[offset]!;
+    const type =
+      this.sealedOperations?.types.at(offset) ??
+      this.operations().operationTypes[offset];
+    const index = this.operationIndexAt(offset);
+    const length = this.operationLengthAt(offset);
     if (type === INSERT_OPERATION) {
-      const start = insertStarts[offset]!;
+      const start = this.insertStartAt(offset);
       return {
         type: OPERATION_TYPE.INSERT,
         index,
@@ -485,7 +487,13 @@ export class PackedEventGraphBase {
   }
 
   isInsertAt(offset: number): boolean {
-    return this.operations().operationTypes[offset] === INSERT_OPERATION;
+    const columns = this.operationColumns;
+    if (columns !== null)
+      return columns.operationTypes[offset] === INSERT_OPERATION;
+    return this.sealedOperations !== null
+      ? this.sealedOperations.types.at(offset) === INSERT_OPERATION
+      : this.loadDeferredOperations().operationTypes[offset] ===
+          INSERT_OPERATION;
   }
 
   /**
@@ -506,11 +514,7 @@ export class PackedEventGraphBase {
     direction: 1 | -1,
     run: PackedKeystrokeRun,
   ): boolean {
-    const { operationTypes, operationLengths } = this.operations();
-    if (
-      operationTypes[offset] !== INSERT_OPERATION ||
-      operationLengths[offset] !== 1
-    ) {
+    if (!this.isInsertAt(offset) || this.operationLengthAt(offset) !== 1) {
       return false;
     }
     const idRun = this.idIndex.canonicalRunAt?.(offset);
@@ -524,8 +528,8 @@ export class PackedEventGraphBase {
     let scan = offset + direction;
     while (
       scan !== runLimit &&
-      operationTypes[scan] === INSERT_OPERATION &&
-      operationLengths[scan] === 1
+      this.isInsertAt(scan) &&
+      this.operationLengthAt(scan) === 1
     ) {
       scan += direction;
     }
@@ -546,14 +550,13 @@ export class PackedEventGraphBase {
     if (agent < 0) {
       return false;
     }
-    const { operationTypes, operationLengths } = this.operations();
     const firstSequence = this.idIndex.sequenceAt(offset);
     let sequence = firstSequence;
     let scan = offset + direction;
     while (
       scan !== limit &&
-      operationTypes[scan] === INSERT_OPERATION &&
-      operationLengths[scan] === 1 &&
+      this.isInsertAt(scan) &&
+      this.operationLengthAt(scan) === 1 &&
       this.idIndex.agentAt(scan) === agent &&
       this.idIndex.sequenceAt(scan) === sequence + direction
     ) {
@@ -567,15 +570,27 @@ export class PackedEventGraphBase {
   }
 
   operationIndexAt(offset: number): number {
-    return this.operations().operationIndexes[offset]!;
+    const columns = this.operationColumns;
+    if (columns !== null) return columns.operationIndexes[offset]!;
+    return this.sealedOperations !== null
+      ? this.sealedOperations.indexes.at(offset)
+      : this.loadDeferredOperations().operationIndexes[offset]!;
   }
 
   operationLengthAt(offset: number): number {
-    return this.operations().operationLengths[offset]!;
+    const columns = this.operationColumns;
+    if (columns !== null) return columns.operationLengths[offset]!;
+    return this.sealedOperations !== null
+      ? this.sealedOperations.lengths.at(offset)
+      : this.loadDeferredOperations().operationLengths[offset]!;
   }
 
   insertStartAt(offset: number): number {
-    return this.operations().insertStarts[offset]!;
+    const columns = this.operationColumns;
+    if (columns !== null) return columns.insertStarts[offset]!;
+    return this.sealedOperations !== null
+      ? this.sealedOperations.insertStarts.at(offset)
+      : this.loadDeferredOperations().insertStarts[offset]!;
   }
 
   sliceInsertedContent(start: number, end: number): string {
@@ -583,11 +598,35 @@ export class PackedEventGraphBase {
   }
 
   timestampAt(offset: number): number | undefined {
-    return this.operations().timestamps[offset];
+    const columns = this.operationColumns;
+    if (columns !== null) return columns.timestamps[offset];
+    if (this.sealedOperations !== null)
+      return this.isOffset(offset)
+        ? this.sealedOperations.timestamps.at(offset)
+        : undefined;
+    return this.loadDeferredOperations().timestamps[offset];
+  }
+
+  /** Seal once after a large receive, after replay has consumed dense columns. */
+  compactOperations(sealed?: SealedOperationColumns): void {
+    if (this.sealedOperations !== null) return;
+    this.sealedOperations =
+      sealed ?? new SealedOperationColumns(this.operations());
+    this.operationColumns = null;
+  }
+
+  /** Dense copies for extending an already sealed linear prefix. */
+  materializeOperations(): PackedOperationColumns {
+    return this.sealedOperations?.materialize() ?? this.operations();
   }
 
   private operations(): PackedOperationColumns {
-    return this.operationColumns ?? this.loadDeferredOperations();
+    // Dense views of sealed columns are temporary; reads keep the compact owner.
+    return (
+      this.operationColumns ??
+      this.sealedOperations?.materialize() ??
+      this.loadDeferredOperations()
+    );
   }
 
   private loadDeferredOperations(): PackedOperationColumns {

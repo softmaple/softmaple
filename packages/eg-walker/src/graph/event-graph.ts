@@ -51,6 +51,7 @@ import {
   type RankedReplayOrderView,
 } from "./internals/ranked-replay-order";
 import type { Steps } from "./internals/steps";
+import type { SealedOperationColumns } from "./internals/sealed-operation-columns";
 import { NO_RANK, TailEventLog } from "./internals/tail-event-log";
 import {
   encodeTopologicallyOrderedEventsBinary,
@@ -289,6 +290,15 @@ export class EventGraph {
     this.invalidateDerivedCaches();
     this.rankedDiffWorkspace.release();
     this.rankedReplayOrderWorkspace.release();
+  }
+
+  /** Release dense operation columns after a large, committed receive. */
+  compactEventColumns(sealed?: SealedOperationColumns): void {
+    if (this.openAppendTransactions !== 0) return;
+    this.tail.trimCapacity();
+    if (this.packedBase === null) return;
+    if (this.linearChain !== null) this.linearChain.compactOperations(sealed);
+    else this.packedBase.compactOperations(sealed);
   }
 
   /**

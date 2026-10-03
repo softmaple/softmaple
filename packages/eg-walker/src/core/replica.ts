@@ -1087,6 +1087,11 @@ export class EgWalkerReplica {
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
     }
+    if (columns.sealedOperations !== null) {
+      graph.compactEventColumns(
+        eventCountBeforeBatch === 0 ? columns.sealedOperations : undefined,
+      );
+    }
   }
 
   /**

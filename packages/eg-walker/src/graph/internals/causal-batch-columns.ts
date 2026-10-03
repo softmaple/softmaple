@@ -7,6 +7,7 @@ import {
   PackedEventGraphBase,
   type PackedOperationColumns,
 } from "./packed-event-graph-base";
+import { SealedOperationColumns } from "./sealed-operation-columns";
 
 /**
  * Owned columns of a one-shot causal batch. IDs are interned runs; only
@@ -32,6 +33,7 @@ export class CausalBatchColumns {
   private insertStarts: Uint32Array;
   private lastEventId = "";
   private duplicate: EventAlreadyExistsError | null = null;
+  sealedOperations: SealedOperationColumns | null = null;
   count = 0;
   exactChain = true;
 
@@ -161,6 +163,12 @@ export class CausalBatchColumns {
     this.content = this.texts.join("");
     this.texts.length = 0;
     this.externalIndexes.clear();
+    // Build the resident representation alongside the transport's text join.
+    // Receive/replay retains dense views only until the transaction commits.
+    if (this.count >= 16_384)
+      this.sealedOperations = new SealedOperationColumns(
+        this.operationColumns(),
+      );
   }
 
   assertValid(): void {

@@ -6,10 +6,6 @@ import {
   PackedEventGraphBase,
   type PackedEventIdIndex,
 } from "./packed-event-graph-base";
-import type {
-  PackedIntegerColumn,
-  PackedUnsignedIntegerColumn,
-} from "./packed-numeric-columns";
 import type { TailEventLog } from "./tail-event-log";
 
 /** The event graph a suffix view is cut from. */
@@ -55,8 +51,7 @@ export const buildPackedSuffixView = (
     throw new RangeError(`Invalid critical prefix size ${prefixEventCount}`);
   }
   const tail = source.tail;
-  const tailColumns = tail.operationColumns();
-  if (tailColumns === null) {
+  if (tail.hasIrregularEvents()) {
     return null;
   }
   const origin = prefixEventCount - 1;
@@ -68,21 +63,18 @@ export const buildPackedSuffixView = (
   const firstPackedRank = origin + 1;
   const firstTailIndex = Math.max(0, origin + 1 - packedCount);
 
-  const wide =
-    tailColumns.indexes instanceof Float64Array ||
-    tailColumns.lengths instanceof Float64Array ||
-    firstPackedRank < packedEnd;
+  const wide = tail.hasWideUnsignedColumns || firstPackedRank < packedEnd;
   const operationTypes = new Uint8Array(count);
-  const operationIndexes: PackedUnsignedIntegerColumn = wide
+  const operationIndexes = wide
     ? new Float64Array(count)
     : new Uint32Array(count);
-  const operationLengths: PackedUnsignedIntegerColumn = wide
+  const operationLengths = wide
     ? new Float64Array(count)
     : new Uint32Array(count);
-  const timestamps: PackedIntegerColumn =
-    tailColumns.timestamps instanceof Int32Array && firstPackedRank >= packedEnd
-      ? new Int32Array(count)
-      : new Float64Array(count);
+  const timestamps =
+    tail.hasWideTimestamps || firstPackedRank < packedEnd
+      ? new Float64Array(count)
+      : new Int32Array(count);
   const insertStarts = new Uint32Array(count);
   // Offset 0 never replays; give it an empty delete.
   operationTypes[0] = PACKED_OPERATION_TYPE.DELETE;
@@ -134,31 +126,21 @@ export const buildPackedSuffixView = (
   if (firstTailIndex < tail.count) {
     const tailOffset = packedCount + firstTailIndex - origin;
     const tailCount = tail.count - firstTailIndex;
-    operationTypes.set(
-      tailColumns.types.subarray(firstTailIndex, tail.count),
-      tailOffset,
-    );
-    operationIndexes.set(
-      tailColumns.indexes.subarray(firstTailIndex, tail.count),
-      tailOffset,
-    );
-    operationLengths.set(
-      tailColumns.lengths.subarray(firstTailIndex, tail.count),
-      tailOffset,
-    );
-    timestamps.set(
-      tailColumns.timestamps.subarray(firstTailIndex, tail.count),
-      tailOffset,
-    );
     // The tail stores inserted text in insertion order, so the text of the
     // events after the cut is one slice from the first of their inserts.
     let firstInsertStart = -1;
     for (let index = 0; index < tailCount; index++) {
-      if (
-        tailColumns.types[firstTailIndex + index] ===
-        PACKED_OPERATION_TYPE.INSERT
-      ) {
-        const start = tailColumns.insertStarts[firstTailIndex + index]!;
+      const source = firstTailIndex + index;
+      const target = tailOffset + index;
+      const isInsert = tail.isInsertAt(source);
+      operationTypes[target] = isInsert
+        ? PACKED_OPERATION_TYPE.INSERT
+        : PACKED_OPERATION_TYPE.DELETE;
+      operationIndexes[target] = tail.operationIndexAt(source);
+      operationLengths[target] = tail.operationLengthAt(source);
+      timestamps[target] = tail.timestampAt(source);
+      if (isInsert) {
+        const start = tail.insertStartAt(source);
         if (firstInsertStart < 0) {
           firstInsertStart = start;
         }

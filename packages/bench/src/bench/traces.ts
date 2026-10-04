@@ -244,8 +244,8 @@ export interface BenchStatsSummary {
   readonly fullReplays: number;
   readonly partialReplays: number;
   readonly incrementalApplies: number;
-  readonly engineRetreats: number;
-  readonly engineAdvances: number;
+  readonly lifetimeRetreats: number;
+  readonly lifetimeAdvances: number;
   readonly checkpointCount: number;
   readonly sequenceRecordCount: number;
   readonly peakSequenceRecordCount: number;
@@ -278,8 +278,8 @@ export const summariseReplica = (
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
     incrementalApplies: stats.incrementalApplies,
-    engineRetreats: stats.engineRetreats,
-    engineAdvances: stats.engineAdvances,
+    lifetimeRetreats: stats.lifetimeRetreats,
+    lifetimeAdvances: stats.lifetimeAdvances,
     checkpointCount: stats.checkpointCount,
     sequenceRecordCount: stats.sequenceRecordCount,
     peakSequenceRecordCount: stats.peakSequenceRecordCount,
@@ -296,8 +296,8 @@ export const formatStatsLine = (summary: BenchStatsSummary): string =>
   ` fullReplays=${summary.fullReplays}` +
   ` partialReplays=${summary.partialReplays}` +
   ` incrementalApplies=${summary.incrementalApplies}` +
-  ` retreats=${summary.engineRetreats}` +
-  ` advances=${summary.engineAdvances}` +
+  ` retreats=${summary.lifetimeRetreats}` +
+  ` advances=${summary.lifetimeAdvances}` +
   ` checkpoints=${summary.checkpointCount}` +
   ` sequenceRecords=${summary.sequenceRecordCount}` +
   ` peakSequenceRecords=${summary.peakSequenceRecordCount}` +

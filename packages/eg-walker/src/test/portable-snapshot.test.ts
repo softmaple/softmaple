@@ -54,6 +54,34 @@ const createConcurrentReplica = (): EgWalkerReplica => {
 };
 
 describe("PortableSnapshot", () => {
+  it("adopts successful validation work once without counting it as a live full replay", async () => {
+    const source = createConcurrentReplica();
+    const codec = new PortableSnapshotCodec();
+    const snapshot = codec.decode(
+      codec.encode(source.createPortableSnapshot()).slice(),
+    );
+    const restored = EgWalkerReplica.fromPortableSnapshot(snapshot, "reader");
+    expect(restored.getReplayStats().replayedEvents).toBe(0);
+    await restored.prepare();
+    const prepared = restored.getReplayStats();
+    expect(prepared).toMatchObject({
+      snapshotValidationEvents: concurrentEvents.length,
+      replayedEvents: concurrentEvents.length,
+      fullReplayEvents: 0,
+      partialReplayEvents: 0,
+    });
+    expect(prepared.lifetimeRetreats).toBeGreaterThan(0);
+    await restored.prepare();
+    expect(restored.getReplayStats()).toEqual(prepared);
+    restored.insert(0, "!");
+    expect(restored.getReplayStats().replayedEvents).toBe(
+      concurrentEvents.length,
+    );
+    expect(restored.getReplayStats().lifetimeRetreats).toBeGreaterThanOrEqual(
+      prepared.lifetimeRetreats,
+    );
+  });
+
   it("round-trips Unicode text, frontier, events, and sequence continuation", () => {
     const source = createConcurrentReplica();
     const codec = new PortableSnapshotCodec();

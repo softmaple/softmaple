@@ -445,6 +445,15 @@ before decode; the first edit includes lazy graph decode and text validation.
 Hashes must match across the A/B matrix, including concurrent cases without an
 independent expected-text oracle.
 
+Replay work in `paper-bench` and the streaming summaries uses replica-lifetime
+counters, so `retreats`, `advances`, and structural work survive cache eviction.
+The output also reports `fullReplayEvents`, `partialReplayEvents`,
+`replayedEvents`, cache evictions, budget refusals, and the current byte budget.
+The snapshot first-edit table reports the retained cache size separately from
+the **delta** in replayed events and transitions between cold open and first
+edit. Older implementation bundles without these counters show `n/a` for the
+new rows; cache size is never substituted for missing work counters.
+
 For complete paper comparisons, build eg-walker in each checkout first with
 `pnpm exec turbo run build --filter=@softmaple/eg-walker`. Then, from that
 checkout's `packages/bench`, bundle the harness with its own implementation
@@ -479,7 +488,9 @@ node scripts/compare-paper-bench.mjs \
   /path/to/egwalker-paper /path/to/results/full persistence 3
 ```
 
-The comparison driver runs all seven datasets without event/transaction
+The comparison driver runs all seven datasets by default; an optional final
+argument selects a comma-separated subset (for example, `apply 21 C1` for
+additional samples of a noisy lane). It runs without event/transaction
 limits, with a fresh process per sample and alternating version order. It uses
 4096-event causal batches in the isolated apply lane and the existing detailed
 receive/persistence harness in the persistence lane. It records each command,

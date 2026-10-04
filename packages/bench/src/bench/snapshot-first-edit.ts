@@ -182,7 +182,15 @@ export interface SnapshotReplayStats {
   readonly criticalCheckpointHits: number;
   readonly criticalCheckpointMisses: number;
   readonly lastReplaySource: string | null;
-  /** Events the retained replay engine covers; after a partial replay, its length. */
+  readonly replayedEvents?: number;
+  readonly fullReplayEvents?: number;
+  readonly partialReplayEvents?: number;
+  readonly lifetimeRetreats?: number;
+  readonly lifetimeAdvances?: number;
+  readonly replayCacheEvictions?: number;
+  readonly replayCacheBudgetRefusals?: number;
+  readonly replayCacheBudgetBytes?: number;
+  /** Events covered by the retained cache, zero after eviction. */
   readonly replayCacheEvents: number;
   readonly sequenceRecordCount: number;
 }
@@ -856,6 +864,14 @@ const pickReplayStats = (
   criticalCheckpointHits: stats.criticalCheckpointHits,
   criticalCheckpointMisses: stats.criticalCheckpointMisses,
   lastReplaySource: stats.lastReplaySource,
+  replayedEvents: stats.replayedEvents,
+  fullReplayEvents: stats.fullReplayEvents,
+  partialReplayEvents: stats.partialReplayEvents,
+  lifetimeRetreats: stats.lifetimeRetreats,
+  lifetimeAdvances: stats.lifetimeAdvances,
+  replayCacheEvictions: stats.replayCacheEvictions,
+  replayCacheBudgetRefusals: stats.replayCacheBudgetRefusals,
+  replayCacheBudgetBytes: stats.replayCacheBudgetBytes,
   replayCacheEvents: stats.replayCacheEvents,
   sequenceRecordCount: stats.sequenceRecordCount,
 });

@@ -1,7 +1,7 @@
 import fs from "node:fs";
-import { useCallback, useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { useCallback, useState } from "react";
 
 export interface Todo {
   id: number;
@@ -57,15 +57,15 @@ export const Route = createFileRoute("/demo/start/server-funcs")({
 
 function Home() {
   const router = useRouter();
-  let todos = Route.useLoaderData();
+  const todos = Route.useLoaderData();
 
   const [todo, setTodo] = useState("");
 
   const submitTodo = useCallback(async () => {
-    todos = await addTodo({ data: todo });
+    await addTodo({ data: todo });
     setTodo("");
-    router.invalidate();
-  }, [addTodo, todo]);
+    await router.invalidate();
+  }, [router, todo]);
 
   return (
     <div
@@ -101,6 +101,7 @@ function Home() {
             className="w-full px-4 py-3 rounded-lg border border-white/20 bg-white/10 backdrop-blur-sm text-white placeholder-white/60 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent"
           />
           <button
+            type="button"
             disabled={todo.trim().length === 0}
             onClick={submitTodo}
             className="bg-blue-500 hover:bg-blue-600 disabled:bg-blue-500/50 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors"

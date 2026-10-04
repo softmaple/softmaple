@@ -143,7 +143,12 @@ describe("snapshot first-edit lanes", () => {
     expect(result.statsAfterOpen).toMatchObject({
       snapshotValidationReplays: 0,
       fullReplays: 1,
+      fullReplayEvents: fixture.manifest.eventCount,
+      replayedEvents: fixture.manifest.eventCount,
     });
+    expect(result.statsAfterFirstEdit?.replayedEvents).toBe(
+      fixture.manifest.eventCount + (kind === "native-concurrent-0" ? 0 : 42),
+    );
     expect(result.statsAfterFirstEdit?.fullReplays).toBe(1);
     expect(result.heapAfterOpenBytes).toBeGreaterThan(0);
     expect(result.nativeLoadMs).toBeGreaterThanOrEqual(0);

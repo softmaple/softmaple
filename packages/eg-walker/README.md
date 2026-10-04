@@ -3,6 +3,33 @@
 Eg-walker implementation for collaborative plain-text editing, based on
 ["Collaborative Text Editing with Eg-walker: Better, Faster, Smaller"](https://arxiv.org/abs/2409.14252).
 
+## Replay diagnostics
+
+`replica.getReplayStats()` distinguishes completed work from retained state:
+
+- `fullReplayEvents` and `partialReplayEvents` count every event visited by
+  live full/suffix replays, including chains applied directly to the text.
+  `replayedEvents` is their sum plus `snapshotValidationEvents`. Incremental
+  applies are counted separately. Compare before/after values to measure an edit.
+- `lifetimeRetreats`, `lifetimeAdvances`, and the other `lifetime*` work counters
+  include engines used by live replays and snapshot validation, even temporary
+  engines discarded within a replay
+  and engines released at a critical cut or byte budget. Successful snapshot
+  validation contributes its engine work once when the replica adopts it.
+- `replayCacheEvictions` counts retained engines released by cache policy or a
+  direct linear batch; replacing an engine during replay is not an eviction. `replayCacheBudgetRefusals` counts byte-budget
+  refusals, including a newly built engine that was never retained. A budget
+  eviction increments both; a critical-cut release increments only evictions.
+  `replayCacheBudgetBytes` is the current adaptive budget.
+- `replayCacheEvents` and `replayCacheBytes` describe the cache retained **now**;
+  neither measures work. `currentEngineStats` describes only the retained engine
+  and is `null` without one. Legacy flat engine/Fugue/sequence counters preserve
+  their previous current-engine or latest-replay scope for compatibility.
+
+These diagnostics are local to a replica instance and are not persisted.
+Rejected transactions restore their previous counters, so the totals describe
+committed work rather than CPU time spent on failed attempts or recovery.
+
 ## Architecture
 
 The package is organized around the paper's prepare/effect model:

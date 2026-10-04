@@ -314,6 +314,11 @@ interface RemoteBatchSnapshot {
   readonly currentVersion: Version;
   readonly engineStats: EngineStats | null;
   readonly engineStatsOverride: EngineStats | null;
+  readonly retiredEngineStats: EngineStats | null;
+  readonly fullReplayEvents: number;
+  readonly partialReplayEvents: number;
+  readonly replayCacheEvictions: number;
+  readonly replayCacheBudgetRefusals: number;
   readonly checkpoints: CriticalCheckpointStoreSnapshot;
   readonly fullReplayCount: number;
   readonly partialReplayCount: number;
@@ -394,6 +399,14 @@ export class EgWalkerReplica {
   private engine: EgWalkerEngine | null = null;
   /** Exact diagnostic view retained across an exceptional engine rebuild. */
   private engineStatsOverride: EngineStats | null = null;
+  /** Completed engine lifetimes, excluding the engine still in use. */
+  private retiredEngineStats: EngineStats | null = null;
+  /** Restored history excluded from lifetime work, even after engine retirement. */
+  private restoredEngineEventBaseline = 0;
+  private fullReplayEvents = 0;
+  private partialReplayEvents = 0;
+  private replayCacheEvictions = 0;
+  private replayCacheBudgetRefusals = 0;
   private replayCacheBaseVersion: Version | null = null;
   /**
    * Events before the replay-cache base's cut, which is the base version's
@@ -808,24 +821,32 @@ export class EgWalkerReplica {
       deleteTargets = snapshot.deleteTargets;
     }
 
-    return new EgWalkerReplica(replicaId, validated.initialText, graph, {
-      skipReplay: true,
-      restoredText: validated.text,
-      currentVersion: snapshotFrontier,
-      nextSequenceNumber: validated.nextSequenceNumber,
-      lazyEventGraph,
-      deferLocalReplay: restoredEngine === undefined,
-      restoredSequenceRecords:
-        sequenceRecords.length === 0 && deleteTargets.length === 0
-          ? undefined
-          : sequenceRecords,
-      restoredDeleteTargets:
-        sequenceRecords.length === 0 && deleteTargets.length === 0
-          ? undefined
-          : deleteTargets,
-      restoredEngine,
-      restoredCheckpoints: validated.checkpoints,
-    });
+    const replica = new EgWalkerReplica(
+      replicaId,
+      validated.initialText,
+      graph,
+      {
+        skipReplay: true,
+        restoredText: validated.text,
+        currentVersion: snapshotFrontier,
+        nextSequenceNumber: validated.nextSequenceNumber,
+        lazyEventGraph,
+        deferLocalReplay: restoredEngine === undefined,
+        restoredSequenceRecords:
+          sequenceRecords.length === 0 && deleteTargets.length === 0
+            ? undefined
+            : sequenceRecords,
+        restoredDeleteTargets:
+          sequenceRecords.length === 0 && deleteTargets.length === 0
+            ? undefined
+            : deleteTargets,
+        restoredEngine,
+        restoredCheckpoints: validated.checkpoints,
+      },
+    );
+    replica.restoredEngineEventBaseline =
+      restoredEngine?.getStats().eventsProcessed ?? 0;
+    return replica;
   }
 
   /**
@@ -1292,7 +1313,8 @@ export class EgWalkerReplica {
     graph: EventGraph,
   ): ReadonlyArray<PositionOperation> {
     const previousStats = this.engineStatsOverride ?? this.engine?.getStats();
-    this.captureEnginePeakBeforeSwap();
+    if (this.engine !== null) this.replayCacheEvictions++;
+    this.captureEngineStatsBeforeSwap();
     this.engine = null;
     this.engineStatsOverride =
       previousStats === undefined
@@ -1400,7 +1422,8 @@ export class EgWalkerReplica {
     eventCountBeforeBatch: number,
   ): void {
     const previousStats = this.engineStatsOverride ?? this.engine?.getStats();
-    this.captureEnginePeakBeforeSwap();
+    if (this.engine !== null) this.replayCacheEvictions++;
+    this.captureEngineStatsBeforeSwap();
     this.engine = null;
     this.engineStatsOverride =
       previousStats === undefined
@@ -1455,8 +1478,15 @@ export class EgWalkerReplica {
    *   from scratch (engine cold-start or recovery path).
    * - `incrementalApplies` increments each time a single event is applied on
    *   top of existing engine state via retreat/advance.
-   * - `engineRetreats` / `engineAdvances` are the cumulative engine counters,
-   *   useful for proving replay work stays bounded to the divergent suffix.
+   * - `replayedEvents` counts full and partial replay events plus successful
+   *   snapshot validation events, including chains replayed without an engine.
+   *   Incremental applies are separate. All work counters roll back with a
+   *   rejected batch; they describe committed work, not failed attempts.
+   * - `lifetime*` counters include discarded engines and successful snapshot
+   *   validation. They survive cache release and engine replacement.
+   * - `currentEngineStats` describes only the retained engine (null if absent).
+   *   Legacy fields such as `engineRetreats`, `sequenceTreeOperations` and
+   *   `fugueComparisons` retain their engine/latest-replay scope.
    * - `peakSequenceRecordCount` is monotonic across the replica's lifetime:
    *   the engine's own peak resets on every partial/full replay engine swap,
    *   so we max in {@link replicaPeakSequenceRecordCount} (the peak captured
@@ -1472,6 +1502,30 @@ export class EgWalkerReplica {
     readonly snapshotValidationReplays: number;
     readonly snapshotValidationEvents: number;
     readonly snapshotValidationLinearReplays: number;
+    /** Total replayed events, including successful snapshot validation. */
+    readonly replayedEvents: number;
+    /** Live full replays, excluding snapshot validation. */
+    readonly fullReplayEvents: number;
+    /** Entire suffix replayed after the selected checkpoint, including chains. */
+    readonly partialReplayEvents: number;
+    /** Retained engines released by policy or a direct linear apply. */
+    readonly replayCacheEvictions: number;
+    /** Retention checks/evictions refused by the byte budget. */
+    readonly replayCacheBudgetRefusals: number;
+    readonly replayCacheBudgetBytes: number;
+    readonly currentEngineStats: EngineStats | null;
+    readonly lifetimeRetreats: number;
+    readonly lifetimeAdvances: number;
+    readonly lifetimeSequenceTreeOperations: number;
+    readonly lifetimeIntegrationProbeCount: number;
+    readonly lifetimeFugueComparisons: number;
+    readonly lifetimeFugueMarkerOperations: number;
+    readonly lifetimeFugueRotations: number;
+    readonly lifetimeFugueRebuilds: number;
+    readonly lifetimeEngineEventsProcessed: number;
+    readonly lifetimeRecordSplitCount: number;
+    readonly lifetimePrepareToggleCount: number;
+    readonly lifetimePlaceholderStructuralOperations: number;
     readonly fullReplays: number;
     readonly partialReplays: number;
     readonly incrementalApplies: number;
@@ -1502,11 +1556,40 @@ export class EgWalkerReplica {
   } {
     const liveEngineStats = this.engine?.getStats();
     const engineStats = this.engineStatsOverride ?? liveEngineStats;
+    const lifetimeStats = liveEngineStats
+      ? mergeEngineStats(this.retiredEngineStats, liveEngineStats)
+      : this.retiredEngineStats;
     return {
       snapshotValidationReplays: this.snapshotValidationStats.replays,
       snapshotValidationEvents: this.snapshotValidationStats.events,
       snapshotValidationLinearReplays:
         this.snapshotValidationStats.linearReplays,
+      replayedEvents:
+        this.fullReplayEvents +
+        this.partialReplayEvents +
+        this.snapshotValidationStats.events,
+      fullReplayEvents: this.fullReplayEvents,
+      partialReplayEvents: this.partialReplayEvents,
+      replayCacheEvictions: this.replayCacheEvictions,
+      replayCacheBudgetRefusals: this.replayCacheBudgetRefusals,
+      replayCacheBudgetBytes: this.replayCacheBudgetBytes,
+      currentEngineStats: liveEngineStats ?? null,
+      lifetimeRetreats: lifetimeStats?.retreatCount ?? 0,
+      lifetimeAdvances: lifetimeStats?.advanceCount ?? 0,
+      lifetimeSequenceTreeOperations:
+        lifetimeStats?.sequenceTreeOperations ?? 0,
+      lifetimeIntegrationProbeCount: lifetimeStats?.integrationProbeCount ?? 0,
+      lifetimeFugueComparisons: lifetimeStats?.fugueComparisons ?? 0,
+      lifetimeFugueMarkerOperations: lifetimeStats?.fugueMarkerOperations ?? 0,
+      lifetimeFugueRotations: lifetimeStats?.fugueRotations ?? 0,
+      lifetimeFugueRebuilds: lifetimeStats?.fugueRebuilds ?? 0,
+      lifetimeEngineEventsProcessed:
+        (lifetimeStats?.eventsProcessed ?? 0) -
+        this.restoredEngineEventBaseline,
+      lifetimeRecordSplitCount: lifetimeStats?.recordSplitCount ?? 0,
+      lifetimePrepareToggleCount: lifetimeStats?.prepareToggleCount ?? 0,
+      lifetimePlaceholderStructuralOperations:
+        lifetimeStats?.placeholderStructuralOperations ?? 0,
       fullReplays: this.fullReplayCount,
       partialReplays: this.partialReplayCount,
       incrementalApplies: this.incrementalApplyCount,
@@ -1714,6 +1797,9 @@ export class EgWalkerReplica {
     this.currentVersion = validator.currentVersion;
     this.engine = validator.engine;
     this.engineStatsOverride = validator.engineStatsOverride;
+    this.retiredEngineStats = validator.retiredEngineStats;
+    this.replayCacheEvictions += validator.replayCacheEvictions;
+    this.replayCacheBudgetRefusals += validator.replayCacheBudgetRefusals;
     this.engineRecoveryAnchor = validator.engineRecoveryAnchor;
     this.replicaPeakSequenceRecordCount = Math.max(
       this.replicaPeakSequenceRecordCount,
@@ -1787,6 +1873,11 @@ export class EgWalkerReplica {
       currentVersion: this.currentVersion,
       engineStats: this.engine?.getStats() ?? null,
       engineStatsOverride: this.engineStatsOverride,
+      retiredEngineStats: this.retiredEngineStats,
+      fullReplayEvents: this.fullReplayEvents,
+      partialReplayEvents: this.partialReplayEvents,
+      replayCacheEvictions: this.replayCacheEvictions,
+      replayCacheBudgetRefusals: this.replayCacheBudgetRefusals,
       checkpoints: this.criticalCheckpoints.snapshotForTransaction(),
       fullReplayCount: this.fullReplayCount,
       partialReplayCount: this.partialReplayCount,
@@ -1826,6 +1917,11 @@ export class EgWalkerReplica {
     this.documentBuffer = snapshot.documentBuffer;
     this.documentCache = snapshot.documentCache;
     this.engineStatsOverride = snapshot.engineStatsOverride;
+    this.retiredEngineStats = snapshot.retiredEngineStats;
+    this.fullReplayEvents = snapshot.fullReplayEvents;
+    this.partialReplayEvents = snapshot.partialReplayEvents;
+    this.replayCacheEvictions = snapshot.replayCacheEvictions;
+    this.replayCacheBudgetRefusals = snapshot.replayCacheBudgetRefusals;
     this.replayCacheBaseVersion =
       snapshot.replayCacheBaseVersion === null
         ? null
@@ -2042,7 +2138,7 @@ export class EgWalkerReplica {
     // to avoid. Widen the budget before this replay picks its retention so the
     // interval can stay warm next time instead of thrashing.
     this.growReplayCacheBudgetAfterThrash();
-    this.captureEnginePeakBeforeSwap();
+    this.captureEngineStatsBeforeSwap();
     if (graph.isExactLinearHistory()) {
       yield* this.fullReplayLinearGraphSteps(graph, chunking);
       return;
@@ -2211,6 +2307,11 @@ export class EgWalkerReplica {
           engine.preparePackedRetention(plan, sectionIndex, sectionEnd);
           retainedEngine = engine;
           retainedBaseCheckpoint = baseCheckpoint;
+        } else {
+          this.retiredEngineStats = mergeEngineStats(
+            this.retiredEngineStats,
+            generated.stats,
+          );
         }
       }
 
@@ -2264,6 +2365,7 @@ export class EgWalkerReplica {
     }
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
+    this.fullReplayEvents += graph.getEventCount();
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     this.refreshReplayCacheMetrics();
@@ -2370,6 +2472,7 @@ export class EgWalkerReplica {
     this.replayCacheEvents = 0;
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
+    this.fullReplayEvents += graph.getEventCount();
     this.fullReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.FULL;
     this.refreshReplayCacheMetrics();
@@ -2663,18 +2766,20 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Fold the outgoing engine's `peakSequenceRecordCount` into the
-   * replica-lifetime peak. Must be called before any code path that
+   * Fold the outgoing engine's work and peak into lifetime diagnostics.
+   * Must be called before any code path that
    * replaces {@link engine} with a fresh instance (see {@link fullReplay}
    * and {@link partialReplayFromCheckpoint}); otherwise the transient
    * pressure observed during a heavy concurrent merge would silently
    * disappear from {@link getReplayStats} after the rebuild.
    */
-  private captureEnginePeakBeforeSwap(): void {
+  private captureEngineStatsBeforeSwap(): void {
     if (!this.engine) {
       return;
     }
-    const enginePeak = this.engine.getStats().peakSequenceRecordCount;
+    const stats = this.engine.getStats();
+    this.retiredEngineStats = mergeEngineStats(this.retiredEngineStats, stats);
+    const enginePeak = stats.peakSequenceRecordCount;
     if (enginePeak > this.replicaPeakSequenceRecordCount) {
       this.replicaPeakSequenceRecordCount = enginePeak;
     }
@@ -2944,6 +3049,7 @@ export class EgWalkerReplica {
       this.replayCacheBudgetBytes,
     );
     if (!retainable) {
+      this.replayCacheBudgetRefusals++;
       this.releasedCacheAtBudget = true;
     }
     return retainable;
@@ -2980,13 +3086,15 @@ export class EgWalkerReplica {
     }
     if (this.engine !== null) {
       if (overBudget) {
+        this.replayCacheBudgetRefusals++;
         this.releasedCacheAtBudget = true;
       } else {
         this.replayCacheCriticalReleaseCut =
           this.ensureEventGraph().getEventCount();
       }
     }
-    this.captureEnginePeakBeforeSwap();
+    if (this.engine !== null) this.replayCacheEvictions++;
+    this.captureEngineStatsBeforeSwap();
     this.engine = null;
     this.engineStatsOverride = null;
     this.engineRecoveryAnchor = null;
@@ -3018,7 +3126,7 @@ export class EgWalkerReplica {
     // keeps the rebuilt cache or records a new refusal.
     const rebuildsRefusedCache = this.releasedCacheAtBudget;
     this.releasedCacheAtBudget = false;
-    this.captureEnginePeakBeforeSwap();
+    this.captureEngineStatsBeforeSwap();
     const frontier = graph.getFrontierView();
     const plan =
       checkpoint.eventCount > 0 && checkpoint.eventCount < graph.getEventCount()
@@ -3060,6 +3168,7 @@ export class EgWalkerReplica {
     this.currentVersion = frontier;
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
+    this.partialReplayEvents += graph.getEventCount() - checkpoint.eventCount;
     this.partialReplayCount++;
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
     this.refreshReplayCacheMetrics();
@@ -3130,6 +3239,10 @@ export class EgWalkerReplica {
         document,
       );
       document = generated.textBuffer;
+      this.retiredEngineStats = mergeEngineStats(
+        this.retiredEngineStats,
+        generated.stats,
+      );
       peakSequenceRecordCount = Math.max(
         peakSequenceRecordCount,
         generated.stats.peakSequenceRecordCount,
@@ -3227,6 +3340,10 @@ export class EgWalkerReplica {
         collectTransformedOperations: false,
       });
       document = generated.textBuffer;
+      this.retiredEngineStats = mergeEngineStats(
+        this.retiredEngineStats,
+        generated.stats,
+      );
       peakSequenceRecordCount = Math.max(
         peakSequenceRecordCount,
         generated.stats.peakSequenceRecordCount,

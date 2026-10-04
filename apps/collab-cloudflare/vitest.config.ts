@@ -21,6 +21,8 @@ export default defineConfig({
     }),
   ],
   test: {
+    // workerd does not expose the inspector APIs used by V8 coverage.
+    coverage: { provider: "istanbul" },
     // Two Durable Object namespaces now share one `--no-isolate` workerd
     // process across the suite; their accumulated SQLite-backed storage
     // makes the default 10s budget too tight for the later test files.

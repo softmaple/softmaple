@@ -128,6 +128,12 @@ interface ApplyBenchResult {
   readonly fullReplays: number;
   readonly partialReplays: number;
   readonly incrementalApplies: number;
+  readonly replayedEvents: number;
+  readonly fullReplayEvents: number;
+  readonly partialReplayEvents: number;
+  readonly replayCacheEvictions: number;
+  readonly replayCacheBudgetRefusals: number;
+  readonly replayCacheBudgetBytes: number;
   readonly retreats: number;
   readonly advances: number;
   readonly sequenceRecords: number;
@@ -192,6 +198,12 @@ interface NativeBenchResult {
   readonly fullReplays: number;
   readonly partialReplays: number;
   readonly incrementalApplies: number;
+  readonly replayedEvents: number;
+  readonly fullReplayEvents: number;
+  readonly partialReplayEvents: number;
+  readonly replayCacheEvictions: number;
+  readonly replayCacheBudgetRefusals: number;
+  readonly replayCacheBudgetBytes: number;
   readonly retreats: number;
   readonly advances: number;
   readonly checkpointCount: number;
@@ -278,6 +290,12 @@ interface BenchResult {
   readonly fullReplays: number;
   readonly partialReplays: number;
   readonly incrementalApplies: number;
+  readonly replayedEvents: number;
+  readonly fullReplayEvents: number;
+  readonly partialReplayEvents: number;
+  readonly replayCacheEvictions: number;
+  readonly replayCacheBudgetRefusals: number;
+  readonly replayCacheBudgetBytes: number;
   readonly retreats: number;
   readonly advances: number;
   readonly checkpointHits: number;
@@ -634,6 +652,12 @@ const printResult = (result: BenchResult): void => {
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
       `incrementalApplies=${result.incrementalApplies}`,
+      `replayedEvents=${result.replayedEvents}`,
+      `fullReplayEvents=${result.fullReplayEvents}`,
+      `partialReplayEvents=${result.partialReplayEvents}`,
+      `replayCacheEvictions=${result.replayCacheEvictions}`,
+      `replayCacheBudgetRefusals=${result.replayCacheBudgetRefusals}`,
+      `replayCacheBudgetBytes=${result.replayCacheBudgetBytes}`,
       `retreats=${result.retreats}`,
       `advances=${result.advances}`,
       `checkpointHits=${result.checkpointHits}`,
@@ -673,6 +697,12 @@ const printApplyResult = (result: ApplyBenchResult): void => {
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
       `incrementalApplies=${result.incrementalApplies}`,
+      `replayedEvents=${result.replayedEvents}`,
+      `fullReplayEvents=${result.fullReplayEvents}`,
+      `partialReplayEvents=${result.partialReplayEvents}`,
+      `replayCacheEvictions=${result.replayCacheEvictions}`,
+      `replayCacheBudgetRefusals=${result.replayCacheBudgetRefusals}`,
+      `replayCacheBudgetBytes=${result.replayCacheBudgetBytes}`,
       `retreats=${result.retreats}`,
       `advances=${result.advances}`,
       `sequenceRecords=${result.sequenceRecords}`,
@@ -741,6 +771,12 @@ const printNativeResult = (result: NativeBenchResult): void => {
       `fullReplays=${result.fullReplays}`,
       `partialReplays=${result.partialReplays}`,
       `incrementalApplies=${result.incrementalApplies}`,
+      `replayedEvents=${result.replayedEvents}`,
+      `fullReplayEvents=${result.fullReplayEvents}`,
+      `partialReplayEvents=${result.partialReplayEvents}`,
+      `replayCacheEvictions=${result.replayCacheEvictions}`,
+      `replayCacheBudgetRefusals=${result.replayCacheBudgetRefusals}`,
+      `replayCacheBudgetBytes=${result.replayCacheBudgetBytes}`,
       `retreats=${result.retreats}`,
       `advances=${result.advances}`,
       `checkpointCount=${result.checkpointCount}`,
@@ -1001,8 +1037,14 @@ const runNativeDatasetOnce = (
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
     incrementalApplies: stats.incrementalApplies,
-    retreats: stats.engineRetreats,
-    advances: stats.engineAdvances,
+    replayedEvents: stats.replayedEvents,
+    fullReplayEvents: stats.fullReplayEvents,
+    partialReplayEvents: stats.partialReplayEvents,
+    replayCacheEvictions: stats.replayCacheEvictions,
+    replayCacheBudgetRefusals: stats.replayCacheBudgetRefusals,
+    replayCacheBudgetBytes: stats.replayCacheBudgetBytes,
+    retreats: stats.lifetimeRetreats,
+    advances: stats.lifetimeAdvances,
     checkpointCount: stats.checkpointCount,
     checkpointHits: stats.criticalCheckpointHits,
     checkpointMisses: stats.criticalCheckpointMisses,
@@ -1011,16 +1053,16 @@ const runNativeDatasetOnce = (
     replayCacheEvents: stats.replayCacheEvents,
     replayCacheBytes: stats.replayCacheBytes,
     textBufferNodes: stats.textBufferNodeCount,
-    integrationProbes: stats.integrationProbeCount,
-    fugueComparisons: stats.fugueComparisons,
-    fugueMarkerOperations: stats.fugueMarkerOperations,
-    fugueRotations: stats.fugueRotations,
-    fugueRebuilds: stats.fugueRebuilds,
-    sequenceTreeOperations: stats.sequenceTreeOperations,
-    engineEvents: stats.engineEventsProcessed,
-    recordSplits: stats.recordSplitCount,
-    prepareToggles: stats.prepareToggleCount,
-    placeholderOperations: stats.placeholderStructuralOperations,
+    integrationProbes: stats.lifetimeIntegrationProbeCount,
+    fugueComparisons: stats.lifetimeFugueComparisons,
+    fugueMarkerOperations: stats.lifetimeFugueMarkerOperations,
+    fugueRotations: stats.lifetimeFugueRotations,
+    fugueRebuilds: stats.lifetimeFugueRebuilds,
+    sequenceTreeOperations: stats.lifetimeSequenceTreeOperations,
+    engineEvents: stats.lifetimeEngineEventsProcessed,
+    recordSplits: stats.lifetimeRecordSplitCount,
+    prepareToggles: stats.lifetimePrepareToggleCount,
+    placeholderOperations: stats.lifetimePlaceholderStructuralOperations,
   };
 };
 
@@ -1117,8 +1159,14 @@ const runDatasetOnce = (
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
     incrementalApplies: stats.incrementalApplies,
-    retreats: stats.engineRetreats,
-    advances: stats.engineAdvances,
+    replayedEvents: stats.replayedEvents,
+    fullReplayEvents: stats.fullReplayEvents,
+    partialReplayEvents: stats.partialReplayEvents,
+    replayCacheEvictions: stats.replayCacheEvictions,
+    replayCacheBudgetRefusals: stats.replayCacheBudgetRefusals,
+    replayCacheBudgetBytes: stats.replayCacheBudgetBytes,
+    retreats: stats.lifetimeRetreats,
+    advances: stats.lifetimeAdvances,
     checkpointHits: stats.criticalCheckpointHits,
     checkpointMisses: stats.criticalCheckpointMisses,
     sequenceRecords: stats.sequenceRecordCount,
@@ -1197,11 +1245,17 @@ const runApplyDatasetOnce = (
     fullReplays: stats.fullReplays,
     partialReplays: stats.partialReplays,
     incrementalApplies: stats.incrementalApplies,
-    retreats: stats.engineRetreats,
-    advances: stats.engineAdvances,
+    replayedEvents: stats.replayedEvents,
+    fullReplayEvents: stats.fullReplayEvents,
+    partialReplayEvents: stats.partialReplayEvents,
+    replayCacheEvictions: stats.replayCacheEvictions,
+    replayCacheBudgetRefusals: stats.replayCacheBudgetRefusals,
+    replayCacheBudgetBytes: stats.replayCacheBudgetBytes,
+    retreats: stats.lifetimeRetreats,
+    advances: stats.lifetimeAdvances,
     sequenceRecords: stats.sequenceRecordCount,
     peakSequenceRecords: stats.peakSequenceRecordCount,
-    sequenceTreeOperations: stats.sequenceTreeOperations,
+    sequenceTreeOperations: stats.lifetimeSequenceTreeOperations,
   };
 };
 

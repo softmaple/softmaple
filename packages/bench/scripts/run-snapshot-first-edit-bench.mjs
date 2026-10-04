@@ -313,11 +313,24 @@ function formatTable(cases, results) {
         ...(kind.startsWith("native-")
           ? [
               {
-                title: `Events replayed by the first edit: ${describeKind(kind)}`,
+                title: `Retained cache events after the first edit: ${describeKind(kind)}`,
                 kind,
                 key: "statsAfterFirstEdit.replayCacheEvents",
                 format: formatCount,
               },
+              ...[
+                ["Events replayed by the first edit", "replayedEvents"],
+                ["Lifetime retreats added by the first edit", "lifetimeRetreats"],
+                ["Lifetime advances added by the first edit", "lifetimeAdvances"],
+                ["Cache evictions by the first edit", "replayCacheEvictions"],
+                ["Budget refusals by the first edit", "replayCacheBudgetRefusals"],
+              ].map(([title, counter]) => ({
+                title: `${title}: ${describeKind(kind)}`,
+                kind,
+                key: `statsAfterFirstEdit.${counter}`,
+                subtractKey: `statsAfterOpen.${counter}`,
+                format: formatCount,
+              })),
             ]
           : []),
         {
@@ -357,12 +370,18 @@ function formatTable(cases, results) {
                   ? opensLikeRestore(result.kind)
                   : result.kind === lane.kind),
             )
-            .map((result) => valueAt(result, lane.key)),
+            .map((result) =>
+              lane.subtractKey === undefined
+                ? valueAt(result, lane.key)
+                : valueAt(result, lane.key) - valueAt(result, lane.subtractKey),
+            ),
         ),
       );
       const change =
         medians.length === 2
-          ? ` ${(((medians[1] - medians[0]) / medians[0]) * 100).toFixed(1)}% |`
+          ? medians.every(Number.isFinite) && medians[0] !== 0
+            ? ` ${(((medians[1] - medians[0]) / medians[0]) * 100).toFixed(1)}% |`
+            : " n/a |"
           : "";
       const format = lane.format ?? formatMs;
       rows.push(

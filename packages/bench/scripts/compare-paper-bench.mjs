@@ -7,11 +7,18 @@ import { fileURLToPath, URL } from "node:url";
 import { performance } from "node:perf_hooks";
 import { runBenchmarkProcess } from "./run-benchmark-process.mjs";
 
-const [before, after, paperRoot, output, lane = "apply", runsArg = "3"] =
-  process.argv.slice(2);
+const [
+  before,
+  after,
+  paperRoot,
+  output,
+  lane = "apply",
+  runsArg = "3",
+  datasetsArg = "S1,S2,S3,C1,C2,A1,A2",
+] = process.argv.slice(2);
 if (!before || !after || !paperRoot || !output)
   throw new Error(
-    "usage: compare-paper-bench.mjs <before.mjs> <after.mjs> <paper-root> <output-dir> [apply|apply-all|native|persistence] [runs]",
+    "usage: compare-paper-bench.mjs <before.mjs> <after.mjs> <paper-root> <output-dir> [apply|apply-all|native|persistence] [runs] [datasets]",
   );
 const directory = resolve(output);
 mkdirSync(directory, { recursive: true });
@@ -19,7 +26,14 @@ const runs = Number(runsArg);
 if (!Number.isSafeInteger(runs) || runs < 1) throw new Error("invalid runs");
 if (!["apply", "apply-all", "native", "persistence"].includes(lane))
   throw new Error("invalid lane");
-for (const dataset of ["S1", "S2", "S3", "C1", "C2", "A1", "A2"]) {
+const datasets = datasetsArg.split(",");
+if (
+  datasets.some(
+    (dataset) => !["S1", "S2", "S3", "C1", "C2", "A1", "A2"].includes(dataset),
+  )
+)
+  throw new Error("invalid datasets");
+for (const dataset of datasets) {
   const failedVersions = new Set();
   for (let run = 1; run <= runs; run++) {
     for (const version of run % 2 ? ["before", "after"] : ["after", "before"]) {

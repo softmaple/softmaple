@@ -61,16 +61,25 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getReplayStats().fullReplays).toBe(0);
   });
 
-  it("should continue local editing after restoring from decoded snapshot bytes", () => {
+  it.each([
+    false,
+    true,
+  ])("should count only new lifetime work after native restore (decoded: %s)", (decode) => {
     // Arrange
     const replica = new EgWalkerReplica("alice", "");
     replica.insert(0, "A");
     replica.insert(1, "B");
     const codec = new NativeSnapshotCodec();
-    const decoded = codec.decode(
-      codec.encode(replica.createNativeSnapshot({ resumeCache: "rebuild" })),
+    const snapshot = replica.createNativeSnapshot({ resumeCache: "rebuild" });
+    const restored = EgWalkerReplica.fromNativeSnapshot(
+      decode ? codec.decode(codec.encode(snapshot)) : snapshot,
+      "alice",
     );
-    const restored = EgWalkerReplica.fromNativeSnapshot(decoded, "alice");
+    expect(restored.getReplayStats()).toMatchObject({
+      lifetimeEngineEventsProcessed: 0,
+      engineEventsProcessed: 2,
+      currentEngineStats: { eventsProcessed: 2 },
+    });
 
     // Act
     restored.insert(2, "C");
@@ -81,6 +90,11 @@ describe("EgWalkerReplica native snapshots", () => {
       "alice:2",
     );
     expect(restored.getReplayStats().fullReplays).toBe(0);
+    expect(restored.getReplayStats()).toMatchObject({
+      lifetimeEngineEventsProcessed: 1,
+      engineEventsProcessed: 3,
+      currentEngineStats: { eventsProcessed: 3 },
+    });
   });
 
   it("should incrementally apply remote edits after local edits on a restored snapshot", () => {
@@ -149,6 +163,7 @@ describe("EgWalkerReplica native snapshots", () => {
     expect(restored.getText()).toBe("SA");
     expect(stats.replayCacheCoverageChecks).toBe(1);
     expect(stats.fullReplays + stats.partialReplays).toBe(1);
+    expect(stats.lifetimeEngineEventsProcessed).toBe(3);
   });
 
   it("should partial replay bounded concurrent remote edits after snapshot restore", () => {
@@ -505,6 +520,10 @@ describe("EgWalkerReplica native snapshots", () => {
       parent = id;
     }
     expect(restored.getReplayStats().replayCacheEvents).toBe(0);
+    expect(restored.getReplayStats()).toMatchObject({
+      currentEngineStats: null,
+      lifetimeEngineEventsProcessed: 4_097,
+    });
     const codec = new NativeSnapshotCodec();
 
     // Act
@@ -523,6 +542,7 @@ describe("EgWalkerReplica native snapshots", () => {
       ),
     ).toBe(rebuilt.text.length);
     expect(resumed.getText()).toBe(`${rebuilt.text}Z`);
+    expect(resumed.getReplayStats().lifetimeEngineEventsProcessed).toBe(1);
   });
 
   it("should omit the complete resume extension when requested", () => {

@@ -25,8 +25,7 @@ const insert = (
 });
 
 const replayCacheBudget = (replica: EgWalkerReplica): number =>
-  (replica as unknown as { replayCacheBudgetBytes: number })
-    .replayCacheBudgetBytes;
+  replica.getReplayStats().replayCacheBudgetBytes;
 
 /**
  * A shared root, then the receiver's own event `a:0`. Every `b:*` event
@@ -84,6 +83,28 @@ afterEach(() => {
 });
 
 describe("adaptive replay-cache budget", () => {
+  it("counts a full-replay retention refusal separately from an eviction", () => {
+    const replica = new EgWalkerReplica("receiver", LARGE_TEXT);
+    replica.applyRemoteEvent(insert("a:0", [], 0, "a"));
+    replica.applyRemoteEvent(insert("b:0", [], 0, "b"));
+    const refused = replica.getReplayStats();
+    expect(refused).toMatchObject({
+      fullReplayEvents: 2,
+      replayCacheBudgetRefusals: 1,
+      replayCacheEvictions: 0,
+      replayCacheEvents: 0,
+      currentEngineStats: null,
+    });
+    expect(refused.lifetimeRetreats).toBeGreaterThan(0);
+    replica.applyRemoteEvent(insert("b:1", ["b:0"], 1, "c"));
+    expect(replica.getReplayStats()).toMatchObject({
+      fullReplayEvents: 5,
+      replayCacheBudgetRefusals: 1,
+      replayCacheEvictions: 0,
+      replayCacheBudgetBytes: 2 * BASE_BUDGET,
+    });
+  });
+
   it("keeps a cache that a partial replay rebuilds after a budget refusal", () => {
     const replica = divergedReceiver(LARGE_TEXT);
 
@@ -91,6 +112,9 @@ describe("adaptive replay-cache budget", () => {
     replica.applyRemoteEvent(branch[0]!);
     expect(replica.getReplayStats()).toMatchObject({
       partialReplays: 1,
+      partialReplayEvents: 2,
+      replayCacheEvictions: 1,
+      replayCacheBudgetRefusals: 1,
       replayCacheBytes: 0,
     });
     expect(replayCacheBudget(replica)).toBe(BASE_BUDGET);
@@ -99,6 +123,10 @@ describe("adaptive replay-cache budget", () => {
     replica.applyRemoteEvent(branch[1]!);
     const rebuilt = replica.getReplayStats();
     expect(rebuilt.partialReplays).toBe(2);
+    expect(rebuilt.partialReplayEvents).toBe(5);
+    expect(rebuilt.replayCacheEvictions).toBe(1);
+    expect(rebuilt.replayCacheBudgetRefusals).toBe(1);
+    expect(rebuilt.lifetimeRetreats).toBeGreaterThan(0);
     expect(rebuilt.replayCacheEvents).toBe(3);
     expect(rebuilt.replayCacheBytes).toBeGreaterThan(BASE_BUDGET);
     expect(replayCacheBudget(replica)).toBe(2 * BASE_BUDGET);
@@ -182,6 +210,9 @@ describe("adaptive replay-cache budget", () => {
       replica.applyRemoteEvent(event);
       expect(replica.getReplayStats()).toMatchObject({
         partialReplays: index + 1,
+        partialReplayEvents: ((index + 1) * (index + 4)) / 2,
+        replayCacheEvictions: index + 1,
+        replayCacheBudgetRefusals: index + 1,
         replayCacheBytes: 0,
         sequenceRecordCount: 0,
       });

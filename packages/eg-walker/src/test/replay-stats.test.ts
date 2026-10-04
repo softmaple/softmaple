@@ -26,6 +26,139 @@ const buildLinearHistory = (count: number): GraphEvent[] => {
 };
 
 describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
+  describe("lifetime work", () => {
+    it("counts linear replay events without attributing incremental edits to replay", () => {
+      const graph = new EventGraph();
+      for (const event of buildLinearHistory(5)) graph.addEvent(event);
+      const replica = new EgWalkerReplica("reader", "", graph);
+      expect(replica.getReplayStats()).toMatchObject({
+        replayedEvents: 5,
+        fullReplayEvents: 5,
+        partialReplayEvents: 0,
+        lifetimeEngineEventsProcessed: 0,
+        currentEngineStats: null,
+        replayCacheEvictions: 0,
+        replayCacheBudgetRefusals: 0,
+        replayCacheBudgetBytes: 32 * 1024 * 1024,
+      });
+      replica.insert(5, "!");
+      expect(replica.getReplayStats().replayedEvents).toBe(5);
+    });
+
+    it("adds partial and full replay work exactly once across engine replacements", () => {
+      const replica = new EgWalkerReplica("reader");
+      replica.applyRemoteEvents(buildLinearHistory(5));
+      replica.insert(5, "L");
+      replica.applyRemoteEvent({
+        id: "bob:0",
+        parentVersion: new Set(["alice:4"]),
+        operation: { type: "insert", index: 5, text: "R" },
+        timestamp: 10,
+      });
+      const partial = replica.getReplayStats();
+      expect(partial).toMatchObject({
+        partialReplayEvents: 2,
+        fullReplayEvents: 0,
+        replayedEvents: 2,
+      });
+      expect(partial.lifetimeRetreats).toBeGreaterThan(0);
+      expect(partial.lifetimeAdvances).toBe(
+        partial.currentEngineStats?.advanceCount,
+      );
+      expect(replica.getReplayStats()).toEqual(partial);
+
+      replica.applyRemoteEvent({
+        id: "carol:0",
+        parentVersion: new Set(),
+        operation: { type: "insert", index: 0, text: "C" },
+        timestamp: 11,
+      });
+      const full = replica.getReplayStats();
+      expect(full).toMatchObject({
+        partialReplayEvents: 2,
+        fullReplayEvents: 8,
+        replayedEvents: 10,
+      });
+      expect(full.lifetimeRetreats).toBe(
+        partial.lifetimeRetreats + full.engineRetreats,
+      );
+      expect(full.lifetimeAdvances).toBe(
+        partial.lifetimeAdvances + full.engineAdvances,
+      );
+      expect(full.lifetimeSequenceTreeOperations).toBe(
+        partial.lifetimeSequenceTreeOperations + full.sequenceTreeOperations,
+      );
+      expect(full.lifetimeFugueComparisons).toBe(
+        partial.lifetimeFugueComparisons + full.fugueComparisons,
+      );
+
+      replica.applyRemoteEvents([
+        {
+          id: "merge:0",
+          parentVersion: replica.getFrontier(),
+          operation: { type: "insert", index: 0, text: "!" },
+          timestamp: 12,
+        },
+        {
+          id: "merge:1",
+          parentVersion: new Set(["merge:0"]),
+          operation: { type: "insert", index: 0, text: "!" },
+          timestamp: 13,
+        },
+      ]);
+      const released = replica.getReplayStats();
+      expect(released).toMatchObject({
+        replayedEvents: 10,
+        replayCacheEvents: 0,
+        replayCacheEvictions: 1,
+        currentEngineStats: null,
+        lifetimeRetreats: full.lifetimeRetreats,
+        lifetimeAdvances: full.lifetimeAdvances,
+        lifetimeSequenceTreeOperations: full.lifetimeSequenceTreeOperations,
+        lifetimeFugueComparisons: full.lifetimeFugueComparisons,
+      });
+      replica.insert(0, "?");
+      expect(replica.getReplayStats().lifetimeRetreats).toBe(
+        released.lifetimeRetreats,
+      );
+    });
+
+    it("keeps work from discarded cold-replay engines with no retained cache", () => {
+      const graph = new EventGraph();
+      for (const event of [
+        {
+          id: "a:0",
+          parentVersion: new Set<string>(),
+          operation: { type: "insert" as const, index: 0, text: "a" },
+          timestamp: 0,
+        },
+        {
+          id: "b:0",
+          parentVersion: new Set<string>(),
+          operation: { type: "insert" as const, index: 0, text: "b" },
+          timestamp: 1,
+        },
+        {
+          id: "merge:0",
+          parentVersion: new Set(["a:0", "b:0"]),
+          operation: { type: "insert" as const, index: 2, text: "!" },
+          timestamp: 2,
+        },
+      ])
+        graph.addEvent(event);
+      const replica = new EgWalkerReplica("reader", "", graph);
+      const cold = replica.getReplayStats();
+      expect(cold.currentEngineStats).toBeNull();
+      expect(cold.replayedEvents).toBe(3);
+      expect(cold.lifetimeRetreats).toBe(cold.engineRetreats);
+      expect(cold.lifetimeRetreats).toBeGreaterThan(0);
+      replica.insert(3, "?");
+      expect(replica.getReplayStats().lifetimeRetreats).toBe(
+        cold.lifetimeRetreats,
+      );
+    });
+  });
+
   describe("peakSequenceRecordCount", () => {
     it("starts at zero before any event is applied", () => {
       const api = new EgWalkerReplica("r1");

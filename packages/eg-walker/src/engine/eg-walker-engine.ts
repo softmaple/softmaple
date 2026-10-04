@@ -837,7 +837,13 @@ export class EgWalkerEngine {
       rotations: stats.fugueRotations,
       rebuilds: stats.fugueRebuilds,
     });
-    this.sequence.restoreStructuralOperationCount(stats.sequenceTreeOperations);
+    // getStats adds the rebuilt placeholder trees' operations separately.
+    // Their work is already included in the saved aggregate, so subtract it
+    // here to avoid counting recovery work again after a rollback.
+    this.sequence.restoreStructuralOperationCount(
+      stats.sequenceTreeOperations -
+        this.segmentedPlaceholderStructuralOperationCount(),
+    );
     this.recordSplitCount = stats.recordSplitCount;
     this.prepareToggleCount = stats.prepareToggleCount;
     this.restoredPlaceholderStructuralOperations =

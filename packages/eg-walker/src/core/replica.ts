@@ -401,6 +401,8 @@ export class EgWalkerReplica {
   private engineStatsOverride: EngineStats | null = null;
   /** Completed engine lifetimes, excluding the engine still in use. */
   private retiredEngineStats: EngineStats | null = null;
+  /** Restored history excluded from lifetime work, even after engine retirement. */
+  private restoredEngineEventBaseline = 0;
   private fullReplayEvents = 0;
   private partialReplayEvents = 0;
   private replayCacheEvictions = 0;
@@ -819,24 +821,32 @@ export class EgWalkerReplica {
       deleteTargets = snapshot.deleteTargets;
     }
 
-    return new EgWalkerReplica(replicaId, validated.initialText, graph, {
-      skipReplay: true,
-      restoredText: validated.text,
-      currentVersion: snapshotFrontier,
-      nextSequenceNumber: validated.nextSequenceNumber,
-      lazyEventGraph,
-      deferLocalReplay: restoredEngine === undefined,
-      restoredSequenceRecords:
-        sequenceRecords.length === 0 && deleteTargets.length === 0
-          ? undefined
-          : sequenceRecords,
-      restoredDeleteTargets:
-        sequenceRecords.length === 0 && deleteTargets.length === 0
-          ? undefined
-          : deleteTargets,
-      restoredEngine,
-      restoredCheckpoints: validated.checkpoints,
-    });
+    const replica = new EgWalkerReplica(
+      replicaId,
+      validated.initialText,
+      graph,
+      {
+        skipReplay: true,
+        restoredText: validated.text,
+        currentVersion: snapshotFrontier,
+        nextSequenceNumber: validated.nextSequenceNumber,
+        lazyEventGraph,
+        deferLocalReplay: restoredEngine === undefined,
+        restoredSequenceRecords:
+          sequenceRecords.length === 0 && deleteTargets.length === 0
+            ? undefined
+            : sequenceRecords,
+        restoredDeleteTargets:
+          sequenceRecords.length === 0 && deleteTargets.length === 0
+            ? undefined
+            : deleteTargets,
+        restoredEngine,
+        restoredCheckpoints: validated.checkpoints,
+      },
+    );
+    replica.restoredEngineEventBaseline =
+      restoredEngine?.getStats().eventsProcessed ?? 0;
+    return replica;
   }
 
   /**
@@ -1573,7 +1583,9 @@ export class EgWalkerReplica {
       lifetimeFugueMarkerOperations: lifetimeStats?.fugueMarkerOperations ?? 0,
       lifetimeFugueRotations: lifetimeStats?.fugueRotations ?? 0,
       lifetimeFugueRebuilds: lifetimeStats?.fugueRebuilds ?? 0,
-      lifetimeEngineEventsProcessed: lifetimeStats?.eventsProcessed ?? 0,
+      lifetimeEngineEventsProcessed:
+        (lifetimeStats?.eventsProcessed ?? 0) -
+        this.restoredEngineEventBaseline,
       lifetimeRecordSplitCount: lifetimeStats?.recordSplitCount ?? 0,
       lifetimePrepareToggleCount: lifetimeStats?.prepareToggleCount ?? 0,
       lifetimePlaceholderStructuralOperations:

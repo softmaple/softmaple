@@ -417,3 +417,59 @@ describe("EventGraph getBranchPreservingTopologicalOrder", () => {
     }
   });
 });
+
+describe("EventGraph getEncodingOrder", () => {
+  it("should keep a replica's typing together where the branch-preserving order takes a shorter branch first", () => {
+    // Arrange: Bob forks after Alice's first keystroke while she keeps typing.
+    const graph = EventGraph.fromEvents([
+      keystroke("alice:0", []),
+      keystroke("alice:1", ["alice:0"]),
+      keystroke("alice:2", ["alice:1"]),
+      keystroke("bob:0", ["alice:0"]),
+    ]);
+
+    // Act
+    const order = encodingOrderIds(graph);
+
+    // Assert
+    expect(branchOrderIds(graph)).toEqual([
+      "alice:0",
+      "bob:0",
+      "alice:1",
+      "alice:2",
+    ]);
+    expect(order).toEqual(["alice:0", "alice:1", "alice:2", "bob:0"]);
+  });
+
+  it("should follow the branch-preserving order when no branch continues the last event's replica", () => {
+    // Arrange
+    const graph = EventGraph.fromEvents([
+      keystroke("alice:0", []),
+      keystroke("carol:0", ["alice:0"]),
+      keystroke("carol:1", ["carol:0"]),
+      keystroke("bob:0", ["alice:0"]),
+    ]);
+
+    // Act
+    const order = encodingOrderIds(graph);
+
+    // Assert
+    expect(order).toEqual(branchOrderIds(graph));
+    expect(order).toEqual(["alice:0", "bob:0", "carol:0", "carol:1"]);
+  });
+});
+
+// Helpers
+
+const encodingOrderIds = (graph: EventGraph): EventId[] =>
+  graph.getEncodingOrder().map((event) => event.id);
+
+const keystroke = (
+  id: EventId,
+  parents: ReadonlyArray<EventId>,
+): GraphEvent => ({
+  id,
+  timestamp: 0,
+  parentVersion: new Set(parents),
+  operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+});

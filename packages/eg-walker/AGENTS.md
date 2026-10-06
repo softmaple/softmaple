@@ -67,6 +67,15 @@ Events are stored in compressed columnar format:
   `decodeBinary` also reads EGW3, so snapshots written before EGW4 still
   load and are saved as EGW4 the next time they are encoded. `EGW1` and
   `EGW2` payloads are rejected.
+- Events are written in `EventGraph.getEncodingOrder()`: the
+  branch-preserving order, except that where branches start, the branch that
+  continues the last event's ID run (the same replica's next sequence) goes
+  first. Kahn's order, which earlier EGW4 encoders wrote, interleaves
+  concurrent branches and pays an ID run, a parent override and an operation
+  span for every switch. The order depends only on the graph's events, so the
+  same events and metadata always encode to the same bytes, whatever order a
+  replica received them in. Bytes can change between releases: decoders
+  accept any topological order, so earlier payloads still decode.
 - Replica IDs and custom event IDs are written once in a string table; ID
   runs refer to them by index and store a start sequence only when a
   replica's sequence jumps.

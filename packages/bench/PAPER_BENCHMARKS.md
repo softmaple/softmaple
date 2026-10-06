@@ -323,7 +323,9 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
 Important output fields:
 
 - `jsonBytes`: JSON `serialize()` payload size.
-- `binaryBytes`: EGW4 columnar graph payload size.
+- `binaryBytes`: EGW4 columnar graph payload size. This lane encodes a graph
+  built from the replica's events, as snapshots do; the `--native-only` lane
+  encodes the converted trace in trace order.
 - `nativeDecodeMs`: EGW4 graph decode time.
 - `nativeLoadMs`: old graph-backed replica load time, including replay.
 - `portableSnapshotBytes`: `EGWP1` portable payload size.

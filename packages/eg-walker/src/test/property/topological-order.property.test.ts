@@ -1,12 +1,16 @@
 /**
  * Property: EventGraph orders its events over insertion ranks exactly like
- * the string-keyed implementations it replaced.
+ * the string-keyed reference implementations.
  *
- * Both orders now run over the packed planning view's runs with typed
- * columns, for an object-only graph, a packed graph and a packed prefix with
- * appended events alike. Event IDs are drawn from a tiny alphabet so that
- * ready events tie on span and path length and fall back to comparing IDs
- * with shared prefixes, numeric suffixes and custom forms.
+ * Every order runs over the packed planning view's runs with typed columns,
+ * for an object-only graph, a packed graph and a packed prefix with appended
+ * events alike. Event IDs are drawn from a tiny alphabet so that ready events
+ * tie on span and path length and fall back to comparing IDs with shared
+ * prefixes, numeric suffixes and custom forms.
+ *
+ * EGW4 encodes in the encoding order, which depends only on the events, so
+ * a graph's bytes do not depend on the order its events were added in or on
+ * how much of it is packed.
  */
 
 import fc from "fast-check";
@@ -19,6 +23,7 @@ import { EventGraph } from "../../graph/event-graph";
 import type { EventId, GraphEvent } from "../../types";
 import {
   getBranchPreservingTopologicalOrder as referenceBranchPreservingOrder,
+  getEncodingOrder as referenceEncodingOrder,
   getTopologicalOrder as referenceKahnOrder,
 } from "../reference-topological-order";
 import { fcParams } from "./run-config";
@@ -103,6 +108,79 @@ describe("property: EventGraph topological orders", () => {
     );
   });
 
+  it("should match the reference encoding order for every graph shape", () => {
+    fc.assert(
+      fc.property(eventDagArb, fc.nat(), (dag, packedSeed) => {
+        // Arrange
+        const events = withVariedOperations(dag);
+        const graph = graphWithPackedPrefix(
+          events,
+          packedSeed % (events.length + 1),
+        );
+
+        // Act
+        const order = graph.getEncodingOrder().map(({ id }) => id);
+
+        // Assert
+        expect(order).toEqual(referenceEncodingOrder(referenceView(events)));
+      }),
+      fcParams(),
+    );
+  });
+
+  it("should encode the same events to the same bytes whatever order they were added in", () => {
+    fc.assert(
+      fc.property(
+        eventDagArb,
+        fc.array(fc.nat()),
+        fc.nat(),
+        fc.nat(),
+        (dag, choices, packedSeed, otherPackedSeed) => {
+          // Arrange
+          const events = withVariedOperations(dag);
+          const reordered = anotherTopologicalOrder(events, choices);
+          const graph = graphWithPackedPrefix(
+            events,
+            packedSeed % (events.length + 1),
+          );
+          const other = graphWithPackedPrefix(
+            reordered,
+            otherPackedSeed % (events.length + 1),
+          );
+          const codec = new ColumnarEventGraphCodec();
+
+          // Act
+          const bytes = codec.encodeBinary(graph);
+          const otherBytes = codec.encodeBinary(other);
+
+          // Assert
+          expect(Buffer.from(otherBytes).equals(bytes)).toBe(true);
+        },
+      ),
+      fcParams(),
+    );
+  });
+
+  it("should re-encode a decoded payload to the same bytes", () => {
+    fc.assert(
+      fc.property(eventDagArb, fc.nat(), (dag, packedSeed) => {
+        // Arrange
+        const events = withVariedOperations(dag);
+        const codec = new ColumnarEventGraphCodec();
+        const bytes = codec.encodeBinary(
+          graphWithPackedPrefix(events, packedSeed % (events.length + 1)),
+        );
+
+        // Act
+        const reencoded = codec.encodeBinary(codec.decodeBinary(bytes));
+
+        // Assert
+        expect(Buffer.from(reencoded).equals(bytes)).toBe(true);
+      }),
+      fcParams(),
+    );
+  });
+
   it("should encode EGW4 from columns exactly like the event encoder", () => {
     fc.assert(
       fc.property(eventDagArb, fc.nat(), (dag, packedSeed) => {
@@ -113,7 +191,7 @@ describe("property: EventGraph topological orders", () => {
           packedSeed % (events.length + 1),
         );
         const expected = encodeTopologicallyOrderedEventsBinary(
-          graph.getLinearReplayOrder() ?? graph.getTopologicalOrder(),
+          graph.getEncodingOrder(),
           graph.getMetadata(),
           Array.from(graph.getFrontier()),
         );
@@ -210,6 +288,31 @@ const graphWithPackedPrefix = (
     graph.addEvent(event);
   }
   return graph;
+};
+
+/**
+ * The same events in another valid causal order: each step adds the ready
+ * event the next of `choices` picks, so no choices keep the original order.
+ */
+const anotherTopologicalOrder = (
+  events: ReadonlyArray<GraphEvent>,
+  choices: ReadonlyArray<number>,
+): GraphEvent[] => {
+  const pending = [...events];
+  const added = new Set<EventId>();
+  const order: GraphEvent[] = [];
+  while (pending.length > 0) {
+    const ready = pending.filter(({ parentVersion }) =>
+      Array.from(parentVersion).every((parent) => added.has(parent)),
+    );
+    const choice =
+      choices.length === 0 ? 0 : choices[order.length % choices.length]!;
+    const next = ready[choice % ready.length]!;
+    pending.splice(pending.indexOf(next), 1);
+    added.add(next.id);
+    order.push(next);
+  }
+  return order;
 };
 
 /** The reference traversal input, built from the events alone. */

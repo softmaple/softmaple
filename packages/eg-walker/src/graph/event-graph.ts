@@ -1204,27 +1204,27 @@ export class EventGraph {
 
   /** @internal Local versions of the frontier events, in frontier order. */
   /**
-   * Encode the graph as EGW4 in `getLinearReplayOrder() ??
-   * getTopologicalOrder()` order, returning the frontier in `getFrontier()`
-   * order.
+   * Encode the graph as EGW4 in {@link getEncodingOrder} order, returning
+   * the frontier in `getFrontier()` order.
    *
-   * @internal Snapshot writers call this instead of materializing every
-   * event; the bytes equal {@link encodeTopologicallyOrderedEventsBinary}
-   * over those events. Graphs holding malformed events take that path so
-   * they fail with the same errors.
+   * @internal Snapshot writers and `ColumnarEventGraphCodec.encodeBinary`
+   * call this instead of materializing every event; the bytes equal
+   * {@link encodeTopologicallyOrderedEventsBinary} over those events. Graphs
+   * holding malformed events take that path so they fail with the same
+   * errors.
    */
   encodeTopologicalBinary(): TopologicalEventGraphEncoding {
     const metadata = this.getMetadata();
     if (this.tail.hasIrregularEvents()) {
       return encodeTopologicallyOrderedEventsBinary(
-        this.getLinearReplayOrder() ?? this.getTopologicalOrder(),
+        this.getLinearReplayOrder() ?? this.getEncodingOrder(),
         metadata,
         Array.from(this.getFrontier()),
       );
     }
     const order = this.isExactLinearHistory()
       ? null
-      : (this.packedReplayBase()?.getTopologicalOrderOffsets() ??
+      : (this.packedReplayBase()?.getEncodingOrderOffsets() ??
         new Uint32Array(0));
     return encodeTopologicalColumnsBinary(
       this.topologicalColumnSource(),
@@ -1749,14 +1749,14 @@ export class EventGraph {
    * Sorts ties by numeric-aware event id via {@link compareEventIds}
    * for deterministic output. This is the default order consumed by
    * `EgWalkerEngine`, `ReplayWalker`, `PartialReplayManager`,
-   * `EgWalkerReplica.fullReplay`, and the columnar codec; its
-   * byte-for-byte output is part of the package's public contract.
+   * `EgWalkerReplica.fullReplay`, and `ColumnarEventGraphCodec.encode`;
+   * its byte-for-byte output is part of the package's public contract.
    *
    * The engine is now traversal-order independent
    * ({@link getBranchPreservingTopologicalOrder} yields the same
-   * document text), but this Kahn ordering is kept as the default
-   * so existing on-disk columnar bytes do not change. For a layout
-   * that minimises retreat/advance churn, see
+   * document text). EGW4 payloads use {@link getEncodingOrder}, which
+   * keeps branches together where this order interleaves them. For a
+   * layout that minimises retreat/advance churn, see
    * {@link getBranchPreservingTopologicalOrder}.
    */
   getTopologicalOrder(): ReadonlyArray<GraphEvent> {
@@ -1801,9 +1801,9 @@ export class EventGraph {
    * The runtime replay paths
    * ({@link EgWalkerReplica.fullReplay},
    * {@link PartialReplayManager.replayFromCheckpoint}) use this
-   * branch-preserving order to minimise retreat/advance churn, while
-   * the columnar codec keeps using {@link getTopologicalOrder} (Kahn)
-   * so on-disk bytes stay stable across runs.
+   * branch-preserving order to minimise retreat/advance churn. EGW4
+   * payloads use {@link getEncodingOrder}, a variant that also keeps
+   * each replica's ID runs together.
    *
    */
   getBranchPreservingTopologicalOrder(): ReadonlyArray<GraphEvent> {
@@ -1818,6 +1818,32 @@ export class EventGraph {
         : Array.from(ranks, (rank) => this.readonlyEventAtInsertionRank(rank)),
     );
     return this.cachedBranchPreservingOrder;
+  }
+
+  /**
+   * Events in the order EGW4 payloads store them: the
+   * {@link getBranchPreservingTopologicalOrder} traversal, except that
+   * where branches start, the branch that continues the last event's ID
+   * run (the same replica's next sequence) comes first.
+   *
+   * That keeps each replica's typing in one ID run whose events each have
+   * the previous event as their only parent, so a concurrent history
+   * needs fewer ID runs, parent overrides and operation spans than in
+   * {@link getTopologicalOrder}, which interleaves branches. The order is a
+   * deterministic function of the graph: graphs holding the same events
+   * produce it whatever order the events were added in.
+   *
+   * @internal The encoders read this order as offsets without materializing
+   * events; this returns it for graphs that need the event encoder, and for
+   * tests. It is not cached.
+   */
+  getEncodingOrder(): ReadonlyArray<GraphEvent> {
+    const ranks = this.packedReplayBase()?.getEncodingOrderOffsets();
+    return Object.freeze(
+      ranks === undefined
+        ? []
+        : Array.from(ranks, (rank) => this.readonlyEventAtInsertionRank(rank)),
+    );
   }
 
   /**

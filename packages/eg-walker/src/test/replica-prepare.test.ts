@@ -83,6 +83,12 @@ const untrustedBytes = (snapshot: PortableSnapshot): Uint8Array =>
 const restore = (bytes: Uint8Array): EgWalkerReplica =>
   EgWalkerReplica.fromPortableSnapshot(codec.decode(bytes), "reader");
 
+/** Events keyed by ID, so graphs compare whatever order they hold them in. */
+const eventsById = (
+  events: ReadonlyArray<GraphEvent>,
+): ReadonlyMap<string, GraphEvent> =>
+  new Map(events.map((event) => [event.id, event]));
+
 /** Settles right away and counts how often preparation yielded. */
 const countingYield = () => {
   const counter = {
@@ -459,9 +465,12 @@ describe("EgWalkerReplica.prepare", () => {
     expect(replica.isPrepared()).toBe(false);
     await replica.prepare({ sliceMs: 0 });
 
-    // Assert
+    // Assert: the restored graph adds the events in EGW4 order, not in the
+    // order the source received them.
     expect(replica.isPrepared()).toBe(true);
-    expect(replica.exportEventGraph()).toEqual(source.exportEventGraph());
+    expect(eventsById(replica.exportEventGraph())).toEqual(
+      eventsById(source.exportEventGraph()),
+    );
   });
 
   it.each([

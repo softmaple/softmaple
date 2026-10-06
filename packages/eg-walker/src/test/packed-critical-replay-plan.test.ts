@@ -16,6 +16,7 @@ import {
   planPackedCriticalReplaySections,
 } from "../engine/packed-critical-replay-plan";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import { EventGraph } from "../graph/event-graph";
 import { PersistentUtf16Rope } from "../text/persistent-utf16-rope";
 import type { EventId, ExternalOperation, GraphEvent, Version } from "../types";
@@ -47,6 +48,12 @@ const pack = (events: ReadonlyArray<GraphEvent>): EventGraph => {
   const codec = new ColumnarEventGraphCodec();
   return codec.decodeBinary(codec.encodeBinary(EventGraph.fromEvents(events)));
 };
+
+/** Decode a payload that stores `events` in their given topological order. */
+const packInOrder = (events: ReadonlyArray<GraphEvent>): EventGraph =>
+  new ColumnarEventGraphCodec().decodeBinary(
+    encodeTopologicallyOrderedEventsBinary(events).binary,
+  );
 
 const prepareText = (engine: EgWalkerEngine): string => {
   let text = "";
@@ -903,14 +910,6 @@ describe("packed critical-section replay planning", () => {
       );
       insertParent = id;
     }
-    events.push(
-      editingEvent(
-        "other:0",
-        ["source:31"],
-        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
-        32,
-      ),
-    );
 
     let deleteParent: EventId = "source:31";
     for (let sequence = 0; sequence < 16; sequence++) {
@@ -925,6 +924,16 @@ describe("packed critical-section replay planning", () => {
       );
       deleteParent = id;
     }
+    // Replay takes the one-event branch before the delete chain, so storing
+    // it after the chain makes replay ranks differ from packed offsets.
+    events.push(
+      editingEvent(
+        "other:0",
+        ["source:31"],
+        { type: OPERATION_TYPE.INSERT, index: 0, text: "" },
+        32,
+      ),
+    );
     events.push(
       editingEvent(
         "merge:0",
@@ -934,7 +943,7 @@ describe("packed critical-section replay planning", () => {
       ),
     );
 
-    const graph = pack(events);
+    const graph = packInOrder(events);
     const plan = planPackedCriticalReplaySections(graph);
     expect(plan).not.toBeNull();
     const objectOrder = graph.getBranchPreservingTopologicalOrder();

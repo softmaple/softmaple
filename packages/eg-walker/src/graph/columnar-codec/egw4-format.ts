@@ -6,6 +6,19 @@
  * stored in topological order, and an event's position in that order is its
  * offset.
  *
+ * Decoders accept any topological order. Encoders write the graph's
+ * encoding order (`EventGraph.getEncodingOrder`): the branch-preserving
+ * order, except that where branches start, the one that continues the last
+ * event's ID run goes first. That keeps concurrent branches and each
+ * replica's typing together, so a concurrent history needs few ID runs,
+ * parent overrides and operation spans. The order depends only on the
+ * graph's events, so graphs holding the same events (each with its parents
+ * in the same order) and the same metadata encode to the same bytes,
+ * whatever order a replica received the events in. The bytes are canonical
+ * for one encoder, not across releases: EGW4 encoders before this one wrote
+ * Kahn's order with ties broken by event ID, and their payloads decode to
+ * the same graph.
+ *
  * ```text
  * magic       varint 4, then "EGW4"
  * eventCount  varint N, at most EGW4_MAX_EVENTS

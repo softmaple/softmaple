@@ -775,6 +775,28 @@ export class PackedEventGraphBase {
    * at the last event of a run.
    */
   getBranchPreservingOrderOffsets(): Uint32Array {
+    return this.branchPreservingOrderOffsets(false);
+  }
+
+  /**
+   * Return the order EGW4 encoders write events in, as packed insertion
+   * offsets: the branch-preserving traversal, except that a branch group
+   * starts with the run that continues the ID run of the event just emitted.
+   *
+   * Where replicas fork and merge, the branch-preserving comparator can take
+   * another replica's branch first even though the replica that wrote the
+   * last event kept typing. Every such switch costs the payload an ID run, a
+   * parent override and usually an operation span. Taking the same replica's
+   * next sequence first writes its typing as one ID run in which each event's
+   * only parent is the event before it. Like the branch-preserving order, the
+   * result depends only on the graph's events, not on the order they were
+   * added.
+   */
+  getEncodingOrderOffsets(): Uint32Array {
+    return this.branchPreservingOrderOffsets(true);
+  }
+
+  private branchPreservingOrderOffsets(continueIdRuns: boolean): Uint32Array {
     const result = new Uint32Array(this.count);
     if (this.exactLinear) {
       for (let offset = 0; offset < this.count; offset++) {
@@ -810,6 +832,9 @@ export class PackedEventGraphBase {
       }
       if (newlyReady.length > 1) {
         sortBranchGroup(newlyReady);
+        if (continueIdRuns) {
+          this.moveIdRunContinuationFirst(newlyReady, end - 1);
+        }
       }
       for (let index = newlyReady.length - 1; index >= 0; index--) {
         stack.push(newlyReady[index]!);
@@ -820,6 +845,32 @@ export class PackedEventGraphBase {
       throw new Error("Cycle detected in packed event graph");
     }
     return result;
+  }
+
+  /**
+   * Move the run of `group` whose first event has the ID after the event at
+   * `offset`, the same replica's next sequence, to the front. The other runs
+   * keep their order.
+   */
+  private moveIdRunContinuationFirst(group: number[], offset: number): void {
+    const agent = this.agentAt(offset);
+    if (agent < 0) {
+      return;
+    }
+    const sequence = this.sequenceAt(offset) + 1;
+    const runs = this.runs;
+    for (let index = 1; index < group.length; index++) {
+      const run = group[index]!;
+      const start = runs.startOf(run);
+      if (
+        this.agentAt(start) === agent &&
+        this.sequenceAt(start) === sequence
+      ) {
+        group.copyWithin(1, 0, index);
+        group[0] = run;
+        return;
+      }
+    }
   }
 
   /**

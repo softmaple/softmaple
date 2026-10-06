@@ -128,38 +128,46 @@ describe("property: EventGraph topological orders", () => {
     );
   });
 
-  it("should encode the same events to the same bytes whatever order they were added in", () => {
-    fc.assert(
-      fc.property(
-        eventDagArb,
-        fc.array(fc.nat()),
-        fc.nat(),
-        fc.nat(),
-        (dag, choices, packedSeed, otherPackedSeed) => {
-          // Arrange
-          const events = withVariedOperations(dag);
-          const reordered = anotherTopologicalOrder(events, choices);
-          const graph = graphWithPackedPrefix(
-            events,
-            packedSeed % (events.length + 1),
-          );
-          const other = graphWithPackedPrefix(
-            reordered,
-            otherPackedSeed % (events.length + 1),
-          );
-          const codec = new ColumnarEventGraphCodec();
+  it(
+    "should encode the same events to the same bytes whatever order they were added in",
+    {
+      // Each run builds and encodes two graphs; under coverage instrumentation
+      // the default run count can take longer than the default per-test timeout.
+      timeout: 15_000,
+    },
+    () => {
+      fc.assert(
+        fc.property(
+          eventDagArb,
+          fc.array(fc.nat()),
+          fc.nat(),
+          fc.nat(),
+          (dag, choices, packedSeed, otherPackedSeed) => {
+            // Arrange
+            const events = withVariedOperations(dag);
+            const reordered = anotherTopologicalOrder(events, choices);
+            const graph = graphWithPackedPrefix(
+              events,
+              packedSeed % (events.length + 1),
+            );
+            const other = graphWithPackedPrefix(
+              reordered,
+              otherPackedSeed % (events.length + 1),
+            );
+            const codec = new ColumnarEventGraphCodec();
 
-          // Act
-          const bytes = codec.encodeBinary(graph);
-          const otherBytes = codec.encodeBinary(other);
+            // Act
+            const bytes = codec.encodeBinary(graph);
+            const otherBytes = codec.encodeBinary(other);
 
-          // Assert
-          expect(Buffer.from(otherBytes).equals(bytes)).toBe(true);
-        },
-      ),
-      fcParams(),
-    );
-  });
+            // Assert
+            expect(Buffer.from(otherBytes).equals(bytes)).toBe(true);
+          },
+        ),
+        fcParams(),
+      );
+    },
+  );
 
   it("should re-encode a decoded payload to the same bytes", () => {
     fc.assert(

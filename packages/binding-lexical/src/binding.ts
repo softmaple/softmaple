@@ -719,7 +719,10 @@ export const createLexicalBinding = ({
     applyRemoteEvents: (input) => {
       const batches = normalizeBatches(input);
       if (isComposing) {
-        queuedRemoteBatches.push(...batches);
+        // Spreading into `push` would overflow the stack for a large delivery.
+        for (const batch of batches) {
+          queuedRemoteBatches.push(batch);
+        }
         return null;
       }
       pendingSelection = captureSelection();

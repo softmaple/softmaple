@@ -38,10 +38,12 @@
 import { afterAll, describe, expect, it } from "vitest";
 
 import { OPERATION_TYPE } from "../constants/operation-types";
+import { EgWalkerReplica } from "../core/replica";
 import { EgWalkerEngine } from "../engine/eg-walker-engine";
 import { ColumnarEventGraphCodec } from "../graph/columnar-codec";
+import { encodeTopologicallyOrderedEventsBinary } from "../graph/columnar-codec/topological-binary-encoder";
 import { EventGraph } from "../graph/event-graph";
-import type { EventId } from "../types";
+import type { EventId, GraphEvent } from "../types";
 import { createPrng } from "./test-helpers";
 
 interface TraceMetrics {
@@ -259,6 +261,45 @@ const buildConcurrentMergeTrace = (
   return graph;
 };
 
+/**
+ * Two authors type one to three keystrokes at a time, at random places, and
+ * each receives a random prefix of the other's undelivered events now and
+ * then, as over a slow network. Returns the events in creation order, the
+ * order a trace records them in.
+ *
+ * Like the paper's C1 and C2 traces, this history is smaller in creation
+ * order than in Kahn or branch-preserving order.
+ */
+const buildDelayedDeliveryTrace = (steps: number): GraphEvent[] => {
+  const prng = createPrng(985);
+  const authors = [new EgWalkerReplica("alice"), new EgWalkerReplica("bob")];
+  const undelivered: GraphEvent[][] = [[], []];
+  const created: GraphEvent[] = [];
+  for (let step = 0; step < steps; step++) {
+    const author = prng() < 0.5 ? 0 : 1;
+    const replica = authors[author]!;
+    let cursor = Math.floor(prng() * (replica.getText().length + 1));
+    const keystrokes = 1 + Math.floor(prng() * 3);
+    for (let keystroke = 0; keystroke < keystrokes; keystroke++) {
+      const ch = String.fromCharCode(0x61 + Math.floor(prng() * 26));
+      const event = replica.insert(cursor++, ch)!;
+      undelivered[author]!.push(event);
+      created.push(event);
+    }
+    for (const sender of [0, 1]) {
+      const outbox = undelivered[sender]!;
+      if (outbox.length > 0 && prng() < 0.5) {
+        const count = 1 + Math.floor(prng() * outbox.length);
+        authors[1 - sender]!.applyRemoteEvents(outbox.splice(0, count));
+      }
+    }
+  }
+  return created;
+};
+
+const bytesInOrder = (events: ReadonlyArray<GraphEvent>): number =>
+  encodeTopologicallyOrderedEventsBinary(events).binary.byteLength;
+
 describe("columnar codec size benchmarks (issue #672)", () => {
   const results: TraceMetrics[] = [];
 
@@ -373,5 +414,22 @@ describe("columnar codec size benchmarks (issue #672)", () => {
     console.info(
       `\nEGW4 binary vs JSON.stringify(serialize()) sizes:\n${summary}\n`,
     );
+  });
+});
+
+describe("EGW4 event order on concurrent histories (issue #985)", () => {
+  it("should write delayed concurrent typing in fewer bytes than Kahn order or creation order", () => {
+    // Arrange
+    const created = buildDelayedDeliveryTrace(1_000);
+    const graph = EventGraph.fromEvents(created);
+
+    // Act
+    const binaryBytes = new ColumnarEventGraphCodec().encodeBinary(
+      graph,
+    ).byteLength;
+
+    // Assert
+    expect(binaryBytes).toBeLessThan(bytesInOrder(graph.getTopologicalOrder()));
+    expect(binaryBytes).toBeLessThanOrEqual(bytesInOrder(created));
   });
 });

@@ -1,13 +1,15 @@
 /**
- * String-keyed reference implementations of the two topological orders.
+ * String-keyed reference implementations of the topological orders.
  *
- * `EventGraph` computes both orders over insertion ranks with typed columns.
- * These are the implementations it replaced, kept as test oracles: they walk
- * `Map<EventId, ...>` state and compare IDs with `compareEventIds`, so a
- * property test can check the numeric orders against them.
+ * `EventGraph` computes these orders over insertion ranks with typed columns.
+ * The Kahn and branch-preserving orders are the implementations it replaced,
+ * kept as test oracles, and the encoding order extends the branch-preserving
+ * one the same way: they walk `Map<EventId, ...>` state and compare IDs with
+ * `compareEventIds`, so a property test can check the numeric orders against
+ * them.
  */
 
-import { compareEventIds } from "../graph/event-id";
+import { compareEventIds, parseEventId } from "../graph/event-id";
 import { MaxHeap } from "../graph/internals/max-heap";
 import type { EventId } from "../types";
 
@@ -90,6 +92,19 @@ export const getTopologicalOrder = (view: TopologicalOrderView): EventId[] => {
  */
 export const getBranchPreservingTopologicalOrder = (
   view: TopologicalOrderView,
+): EventId[] => branchPreservingOrder(view, false);
+
+/**
+ * The order EGW4 encoders write: the branch-preserving order, except that a
+ * branch group starts with the event that continues the ID run of the event
+ * whose children the group holds (the same replica's next sequence).
+ */
+export const getEncodingOrder = (view: TopologicalOrderView): EventId[] =>
+  branchPreservingOrder(view, true);
+
+const branchPreservingOrder = (
+  view: TopologicalOrderView,
+  continueIdRuns: boolean,
 ): EventId[] => {
   const remainingParents = new Map<EventId, number>();
   const ids = Array.from(view.eventIds);
@@ -174,6 +189,9 @@ export const getBranchPreservingTopologicalOrder = (
       continue;
     }
     sortBranchGroup(newlyReady);
+    if (continueIdRuns) {
+      moveIdRunContinuationFirst(newlyReady, id);
+    }
     for (let i = newlyReady.length - 1; i >= 0; i--) {
       stack.push(newlyReady[i]!);
     }
@@ -184,4 +202,23 @@ export const getBranchPreservingTopologicalOrder = (
   }
 
   return result;
+};
+
+/** Move the ID after `id` in its replica's sequence to the front of `group`. */
+const moveIdRunContinuationFirst = (group: EventId[], id: EventId): void => {
+  const parsed = parseEventId(id);
+  if (parsed === null) {
+    return;
+  }
+  const index = group.findIndex((candidate) => {
+    const next = parseEventId(candidate);
+    return (
+      next !== null &&
+      next.replicaId === parsed.replicaId &&
+      next.sequence === parsed.sequence + 1
+    );
+  });
+  if (index > 0) {
+    group.unshift(...group.splice(index, 1));
+  }
 };

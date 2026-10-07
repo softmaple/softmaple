@@ -30,7 +30,6 @@ import {
   strictEventIdSet,
   strictMetadata,
 } from "./graph-validation";
-import { encodeTopologicallyOrderedEventsBinary } from "./topological-binary-encoder";
 
 export type {
   ColumnarDecodeOptions,
@@ -109,12 +108,13 @@ export class ColumnarEventGraphCodec {
     return this.decode(encoded).serialize();
   }
 
-  /** Encode the graph as EGW4, in {@link EventGraph.getTopologicalOrder} order. */
+  /**
+   * Encode the graph as EGW4, in {@link EventGraph.getEncodingOrder} order.
+   * Graphs holding the same events and metadata encode to the same bytes,
+   * whatever order the events were added in.
+   */
   encodeBinary(graph: EventGraph): Uint8Array {
-    return encodeTopologicallyOrderedEventsBinary(
-      graph.getTopologicalOrder(),
-      graph.getMetadata(),
-    ).binary;
+    return graph.encodeTopologicalBinary().binary;
   }
 
   /**

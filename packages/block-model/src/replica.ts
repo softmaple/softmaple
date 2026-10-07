@@ -309,7 +309,11 @@ export class BlockReplica {
         this.eventOwner.set(event.id, batch.batchId);
       }
     }
-    this.integrated.push(...integrated);
+    // Spreading into `push` passes one argument per batch on the stack, which
+    // overflows for a large delivery after the state already integrated it.
+    for (const batch of integrated) {
+      this.integrated.push(batch);
+    }
     for (const batch of plan.ready) {
       this.unpark(batch.batchId);
     }

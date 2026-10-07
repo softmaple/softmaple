@@ -1949,8 +1949,14 @@ export class EventGraph {
   }
 
   /**
-   * Serialize event graph for persistence
-   * Returns only the data that should be saved to disk
+   * JSON-safe copy of the graph: one object per event, with its ID, its
+   * parents' IDs, its operation and its timestamp.
+   *
+   * For debugging, tests and interop on small documents, not for storage. It
+   * builds an object for every event, and on the paper's keystroke traces it
+   * is two to three orders of magnitude larger than EGW4. Store the graph as
+   * EGW4, inside a portable snapshot from
+   * `EgWalkerReplica.createPortableSnapshot`.
    */
   serialize(): SerializedGraphOutput {
     const events = this.getAllEvents();
@@ -1978,7 +1984,8 @@ export class EventGraph {
   }
 
   /**
-   * Deserialize event graph from persistence (Kahn's algorithm; O(n)).
+   * Build a graph from {@link serialize} JSON, or from events with `Set`
+   * parents (Kahn's algorithm; O(n)).
    */
   static deserialize(data: SerializedGraphInput): EventGraph {
     return deserializeEventGraph(data, () => new EventGraph());

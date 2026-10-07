@@ -46,10 +46,14 @@ src/
 
 ## Runtime Model
 
-Portable persistent state (`serialize()`):
+Portable persistent state (`createPortableSnapshot()`, EGWP1 bytes with the
+graph in EGW4):
 
 - Plain document text.
 - Immutable event graph.
+
+JSON `serialize()` holds the same state with one object per event. It is for
+debugging and interop on small documents, not for storage.
 
 Replay working state:
 
@@ -59,7 +63,7 @@ Replay working state:
 - Ranked B-tree leaves with prepare/effect/count aggregates for index mapping.
 
 `EgWalkerReplica` currently retains this working state between edits to make
-the linear/incremental path cheap. It is excluded from portable `serialize()`,
+the linear/incremental path cheap. It is excluded from portable snapshots,
 but the optional native-snapshot format can store sequence records,
 delete-target records, and retained checkpoint texts as an
 implementation-specific fast-load cache. `createNativeSnapshot()` reuses only

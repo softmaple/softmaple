@@ -13,12 +13,17 @@ comparison boundaries explicit.
 
 ## Reference Artifact
 
-The paper artifact lives outside this package. Pass `--paper-root` if your
-checkout is not at the default local path:
+The paper artifact lives outside this package. From the repository root, clone
+it beside the repository, where the harness looks by default, and build the
+`@softmaple/eg-walker` bundle that the `node scripts/...` drivers load
+(`turbo run paper-bench` builds it on its own):
 
-```text
-../egwalker-paper
+```bash
+git clone --depth 1 https://github.com/josephg/egwalker-paper ../egwalker-paper
+pnpm install && pnpm exec turbo run build --filter=@softmaple/eg-walker
 ```
+
+Pass `--paper-root` if your checkout is somewhere else.
 
 The useful files are:
 
@@ -89,10 +94,16 @@ The memory benchmark writes:
 ../egwalker-paper/results/yjs_memusage.json
 ```
 
+On the machine in [Expected Runtime](#expected-runtime), `npm i` takes a few
+seconds, `bench-remote.js` about 2.5 minutes and `bench-memusage.js` about 1.5
+minutes.
+
 ### 2. SoftMaple Raw Trace Ingest
 
-This benchmark imports the paper JSON trace and applies events through
-`EgWalkerReplica.applyRemoteEvent`.
+This benchmark converts the paper JSON trace into one `GraphEvent` per
+keystroke and applies the events through a public receive API of
+`EgWalkerReplica`: `applyCausalBatch`, `applyRemoteEvents`, or one
+`applyRemoteEvent` call per event (see `--apply-api` below).
 
 This is useful as a stress test for the `@softmaple/eg-walker` engine:
 
@@ -103,25 +114,30 @@ This is useful as a stress test for the `@softmaple/eg-walker` engine:
 - Do optimizations improve the same workload over time?
 
 It is not a strict apples-to-apples comparison with Yjs native binary update
-loading, because this path includes JSON parsing, trace conversion, TypeScript
-object allocation, `Set`/`Map` operations, and per-event API overhead.
+loading. Yjs decodes one compact binary update, while this path receives
+`GraphEvent` objects, or causal batches built from them, and validates and
+stores every event through the public API. JSON parsing and trace conversion
+are reported separately, as `loadConvertMs`.
 
 ### 3. SoftMaple Native Payload Load
 
-This is the fairer comparison to Yjs native update loading. The plan is:
+This is the fairer comparison to Yjs native update loading. The harness
+converts each trace into the engine's own binary formats outside the timed
+region, then times decoding and loading them:
 
-1. Convert each paper JSON trace into the engine's own persistent format.
-2. Write native payload files such as `S1.egw`, `S2.egw`, ...
-3. Benchmark native decode/load separately from raw JSON import.
+- EGW4, the columnar event graph: `ColumnarEventGraphCodec.encodeBinary(...)`
+  and `decodeBinary(...)`, then `new EgWalkerReplica(id, "", graph)`, which
+  replays the history.
+- EGWP1, the portable snapshot: `createPortableSnapshot()`,
+  `PortableSnapshotCodec` and `EgWalkerReplica.fromPortableSnapshot(...)`.
+- EGWS1, the native snapshot: `createNativeSnapshot()`, `NativeSnapshotCodec`
+  and `EgWalkerReplica.fromNativeSnapshot(...)`.
 
-The closest current APIs are:
+JSON `serialize()` is not a native payload: it is a debugging and interop
+format, far larger than EGW4 (see
+[JSON serialize() Payloads](#json-serialize-payloads)).
 
-- `EgWalkerReplica.serialize()`
-- `EgWalkerReplica.deserialize(...)`
-- `ColumnarEventGraphCodec.encodeBinary(...)`
-- `ColumnarEventGraphCodec.decodeBinary(...)`
-
-The current persistence benchmark records this mode in three forms:
+The persistence lane records this mode in three forms:
 
 - `nativeDecodeMs` / `nativeLoadMs`: the EGW4 columnar graph path followed
   by `new EgWalkerReplica(..., decodedGraph)`, which still replays history.
@@ -135,6 +151,46 @@ The current persistence benchmark records this mode in three forms:
   includes already-available runtime CRDT state and retained checkpoints, but
   does not rebuild missing state during the timed encode. It is reported
   separately from paper-style portable persistence.
+
+## JSON `serialize()` Payloads
+
+`EgWalkerReplica.serialize()` and `EventGraph.serialize()` produce JSON with
+one object per event: its ID, its parents' IDs, its operation and its
+timestamp. JSON is a format for debugging, tests and interop on small
+documents. Persist documents as portable snapshots, which hold the graph as
+EGW4.
+
+The persistence lane reports the JSON's UTF-8 size as `jsonBytes`, next to
+EGW4 (`binaryBytes`) and the portable snapshot (`portableSnapshotBytes`), for
+a replica that received the whole trace. Measured 2026-10-07 at `c48dda6`:
+
+| Dataset |    Events |     JSON | Bytes per event | EGW4 bytes | JSON / EGW4 | Portable snapshot bytes |
+| ------- | --------: | -------: | --------------: | ---------: | ----------: | ----------------------: |
+| S1      |   779,334 | 151.7 MB |             195 |    335,592 |        452× |                 662,561 |
+| S2      | 1,104,627 | 215.3 MB |             195 |    476,374 |        452× |                 649,088 |
+| S3      | 2,339,471 | 458.9 MB |             196 |    762,910 |        601× |                 888,135 |
+| C1      |   651,950 | 128.6 MB |             197 |    595,877 |        216× |               1,133,314 |
+| C2      |   608,150 | 122.0 MB |             201 |    795,861 |        153× |               1,328,873 |
+| A1      |   947,337 | 179.9 MB |             190 |    353,145 |        509× |                 392,901 |
+| A2      |   697,638 | 131.9 MB |             189 |    336,610 |        392× |                 575,962 |
+
+The EGW4 column encodes the graph in the order snapshots use: 1.01–1.06× the
+size of Diamond Types' `.dt` files on the S and A traces and 1.18–1.28× on C,
+where trace order takes 1.33–1.37× (see [Cold load](#cold-load)).
+
+Every event repeats its own ID and its parents' IDs in full, here 40-odd
+characters such as `paper:S1:agent:number:0000000000000000:41`, so JSON takes
+about 190–200 bytes per keystroke; shorter replica IDs shrink it, but not by
+orders of magnitude. S3's JSON is 85% of the longest string V8 can build
+(2^29 − 24 UTF-16 code units, 512 MiB), so `JSON.stringify` would throw on a
+history about a sixth longer.
+
+The persistence lane builds this JSON, and the objects behind it, for every
+dataset. On the machine in [Expected Runtime](#expected-runtime) it peaks at
+6.2 GiB of RSS on S3, or 9.8 GiB with `--memory`, whose worker rebuilds the
+binary payloads beside the main process; the other lanes stay within 2 GiB.
+For timing and memory on large traces, use `--apply-only` and
+`--native-only`.
 
 ## Paper JSON Shape
 
@@ -227,7 +283,16 @@ The benchmark package script is:
 }
 ```
 
-Baseline commands:
+Run it from the repository root. Every lane replays each dataset in full
+unless `--max-txns` or `--max-events` bounds it, and a full run of all seven
+datasets takes minutes; [Expected Runtime](#expected-runtime) lists each
+lane's wall time.
+
+The default lane measures persistence: it receives the trace through
+`applyRemoteEvents` and records the size of the replica's JSON `serialize()`
+output, then encodes the replica as EGW4, a portable snapshot and a native
+snapshot and loads each of them back. One run of all seven datasets takes
+about 4.5 minutes:
 
 ```bash
 pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets S1 --runs 1
@@ -300,7 +365,6 @@ Phase 0 guardrail suite:
 
 ```bash
 pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --paper-root /path/to/egwalker-paper \
   --plan-phase0 \
   --runs 1
 ```
@@ -310,11 +374,13 @@ This runs:
 - `S1`, `S2`, `S3`, and `A1` at full trace size.
 - `C1` and `C2` bounded to `--max-events 3000` and `--max-events 10000`.
 
+The C1 and C2 bounds are part of the suite's definition, not a runtime limit:
+receiving a full C1 or C2 trace takes 1–5 s in every lane.
+
 Use memory mode for a separate `node --expose-gc` worker per case:
 
 ```bash
 pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --paper-root /path/to/egwalker-paper \
   --plan-phase0 \
   --runs 1 \
   --memory
@@ -322,7 +388,8 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
 
 Important output fields:
 
-- `jsonBytes`: JSON `serialize()` payload size.
+- `jsonBytes`: JSON `serialize()` payload size, for reference only; see
+  [JSON serialize() Payloads](#json-serialize-payloads).
 - `binaryBytes`: EGW4 columnar graph payload size. This lane encodes a graph
   built from the replica's events, as snapshots do; the `--native-only` lane
   encodes the converted trace in trace order.
@@ -369,28 +436,6 @@ The summary line reports each timing's median next to its mean, minimum and
 maximum (`medianNativeDecodeMs`, `medianNativeLoadMs`). Compare builds by
 median.
 
-Do not use full `--datasets all` as the first routine check. Full `C1` and
-`C2` are currently dominated by replay cost. Use bounded concurrent/asynchronous
-smoke tests first:
-
-```bash
-pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --datasets C1 \
-  --runs 1 \
-  --max-txns 3000
-
-pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --datasets C2 \
-  --runs 1 \
-  --max-txns 3000
-
-pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --datasets A2 \
-  --runs 1 \
-  --max-txns 300 \
-  --granularity operation
-```
-
 The script defaults to the `egwalker-paper` artifact beside the repository. The
 path is derived from the `packages/bench` location, so it does
 not depend on the process working directory:
@@ -403,8 +448,8 @@ It also accepts an override:
 
 ```bash
 pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --datasets all \
-  --runs 3 \
+  --datasets S1 \
+  --runs 1 \
   --paper-root /path/to/egwalker-paper
 ```
 
@@ -427,7 +472,10 @@ event. Later concurrent operations may depend on positions inside that inserted
 run. Collapsing the run can make a later operation's parent-version index invalid
 during replay.
 
-`paper-bench` therefore always uses operation-level conversion:
+`A2` is the concrete case: patch-level full ingest fails at txn 289 with an
+out-of-bounds insert. `paper-bench` therefore always uses operation-level
+conversion; `--granularity operation` is the default and the only value it
+accepts:
 
 ```bash
 pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
@@ -436,30 +484,22 @@ pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
   --granularity operation
 ```
 
-Operation-level conversion uses each transaction's `_dtSpan` and emits one
-SoftMaple event per paper keystroke:
+Operation-level conversion emits one SoftMaple event per paper keystroke:
 
 - a delete patch of length `n` emits `n` single-character delete events;
 - an inserted string emits one insert event per character;
-- event IDs use the paper logical version: `paper:{dataset}:lv:{number}`;
+- each paper agent is one replica, and event IDs are
+  `paper:{dataset}:agent:{agent}:{sequence}`. `{agent}` is `number:` and the
+  agent's number zero-padded to 16 digits, so that string order matches
+  numeric order (`string:` and the name for a named agent), and `{sequence}`
+  counts that agent's events from 0;
 - a transaction's child frontier is the last emitted operation in its span.
 
-`--max-events` stops operation expansion at the requested event instead of
-materializing the rest of a large trace and slicing afterward. This keeps
-bounded smoke runs bounded in both time and memory.
-
-This mode is much slower, but it is the right mode for correctness checks on
-traces where patch-level indexes depend on positions inside a long inserted run.
-`A2` is the current concrete case: patch-level full ingest fails at txn 289 with
-an out-of-bounds insert, while the bounded operation-level smoke test passes:
-
-```bash
-pnpm exec turbo run paper-bench --filter=@softmaple/bench -- \
-  --datasets A2 \
-  --runs 1 \
-  --max-txns 300 \
-  --granularity operation
-```
+Every dataset converts and replays in full at this granularity, A2 included;
+see [Expected Runtime](#expected-runtime). `--max-events` stops operation
+expansion at the requested event instead of materializing the rest of a large
+trace and slicing afterward, so a bounded run, for example to profile the
+start of a trace, stays bounded in both time and memory.
 
 ## Final Text Oracle
 
@@ -609,22 +649,203 @@ The benchmark must fail if:
 
 ## Expected Runtime
 
-The historical results below predate both the benchmark-package extraction and
-portable/native metric separation. Their recorded command strings are preserved
-as run. Bare `snapshot*` names in those dated result blocks refer to the native
-`EGWS1` resume-state extension, not the portable `EGWP1` format. New runs print
-both names explicitly, and Phase 6 gates constrain only
-`portableSnapshot*` fields.
+Baselines after the second performance round (#972), measured on 2026-10-07
+at `c48dda6`, on a 4 vCPU Intel Xeon (Cascade Lake, 2.8 GHz) KVM guest with
+15 GB RAM, Linux and Node v22.22.0, with the paper checkout at `4d9bef5`.
+Every command below ran as written, from the repository root. The `70cc242`
+columns rerun the same commands, in the same session, at the commit #972
+started from; on every lane both measured, they come within 0.8–1.4× of
+#972's own numbers (see [History](#history)). Other machines differ by a
+roughly constant factor, so compare builds on one machine, base and head in
+one session.
 
-Current `--phase6-gates` thresholds were calibrated on 2026-07-12 with Node
-v24.12.0 on an Apple M1 from three S1 operation runs at 1,000, 2,000, and 4,000
-events. They constrain portable bytes, encode, decode, lazy restore, explicit
-materialization, and heap. Full S1/S2/S3/A1 operation traces are intentionally
+```bash
+# Receive: the whole trace as one batch, then 4,096-event batches
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets all --runs 3 --apply-only --apply-batch-events all
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets all --runs 3 --apply-only --apply-batch-events 4096
+
+# Per-event receive
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets all --runs 3 --apply-only --apply-api single --max-events 100000
+
+# Cold replay from a decoded EGW4 graph
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets all --runs 3 --native-only
+
+# Open a portable snapshot, then the first edits
+node packages/bench/scripts/run-snapshot-first-edit-bench.mjs --datasets S1,S2,S3,C1,C2,A1,A2 --runs 3 \
+  --kinds native,local,remote,concurrent-10,concurrent-1000,native-concurrent-1000
+
+# Memory a replica retains after receiving a whole trace
+pnpm exec turbo run paper-bench --filter=@softmaple/bench -- --datasets all --runs 1 --apply-only --apply-batch-events all --memory
+```
+
+Wall time of each whole command, all seven datasets:
+
+| Command                       | `c48dda6` | `70cc242` |
+| ----------------------------- | --------: | --------: |
+| Receive, whole trace          |      53 s |      99 s |
+| Receive, 4,096-event batches  |      88 s |     245 s |
+| Per-event receive             |      43 s |      64 s |
+| Cold replay                   |     105 s |     119 s |
+| Portable snapshot first edits |     191 s |         — |
+| Retained memory               |      46 s |      75 s |
+
+The receive lanes run their three runs in one process, so run 1 is cold and
+runs 2 and 3 are warm; `--native-only` starts a fresh worker for every run. The
+tables give the median of the three. Every run validated its final text: a
+whole trace against `endContent` or A2's reference digest, a 100,000-event
+prefix against `applyCausalBatch` replaying the same events.
+
+### Receive
+
+Time of the receive calls and the final `getText()`, in ms, or µs per event
+for one `applyRemoteEvent` call per event over the first 100,000 events.
+Converting the trace beforehand takes another 1–3 s per dataset, reported as
+`loadConvertMs`.
+
+| Dataset |    Events | Whole trace | `70cc242` | 4,096 / batch | `70cc242` | µs per event | `70cc242` |
+| ------- | --------: | ----------: | --------: | ------------: | --------: | -----------: | --------: |
+| S1      |   779,334 |         266 |       684 |           226 |       466 |          6.7 |       8.2 |
+| S2      | 1,104,627 |         129 |       623 |           220 |       481 |          5.5 |       6.7 |
+| S3      | 2,339,471 |         201 |     1,194 |           390 |     1,023 |          5.9 |       6.4 |
+| C1      |   651,950 |       1,087 |     3,408 |         2,807 |    11,645 |         12.4 |      21.9 |
+| C2      |   608,150 |         908 |     3,148 |         3,206 |    12,126 |         12.1 |      20.7 |
+| A1      |   947,337 |         587 |     3,275 |         3,853 |    15,347 |          9.4 |      22.4 |
+| A2      |   697,638 |         807 |     5,507 |         5,545 |    26,213 |         15.8 |      38.4 |
+
+Receiving a whole trace as one batch takes 0.1–1.1 s on every dataset. On the
+concurrent and asynchronous traces, 4,096-event batches still take 2.6–6.9×
+as long as one whole-trace batch, and per-event receive costs 9–16 µs per
+event.
+
+### Cold load
+
+`--native-only` encodes each converted trace as EGW4, in trace order, outside
+the timed region, then decodes and replays it in a fresh `node --expose-gc`
+worker per run, so every run is cold. Replay is `nativeLoadMs`: constructing an
+`EgWalkerReplica` from the decoded graph replays the whole history. Sizes are
+in bytes, times in ms.
+
+| Dataset | DT `.dt` |    EGW4 | EGW4 / DT | Decode | Replay | `70cc242` replay |
+| ------- | -------: | ------: | --------: | -----: | -----: | ---------------: |
+| S1      |  316,413 | 335,592 |      1.06 |     38 |    262 |              248 |
+| S2      |  471,421 | 476,374 |      1.01 |     48 |    169 |              158 |
+| S3      |  729,169 | 762,910 |      1.05 |     78 |    220 |              247 |
+| C1      |  466,960 | 639,559 |      1.37 |    104 |  1,163 |            2,136 |
+| C2      |  676,591 | 898,934 |      1.33 |    145 |  1,157 |            2,324 |
+| A1      |  334,914 | 353,094 |      1.05 |     45 |    724 |            1,437 |
+| A2      |  318,046 | 337,270 |      1.06 |     50 |    785 |            2,726 |
+
+For scale, `node bench-remote.js` (see
+[Yjs Native Baseline](#1-yjs-native-baseline)) loads the same histories into
+Yjs in 121–203 ms on the same machine, as means of warm iterations: S1 126,
+S2 198, S3 166, C1 197, C2 121, A1 203 and A2 186 ms. Cold replay takes 0.85×
+as long as Yjs on S2, 1.3–2.1× on S1 and S3, and 3.6–9.6× on the concurrent and
+asynchronous traces. Diamond Types is not built here; on #972's machine its
+`merge_norm` took 4.1–157 ms (see [History](#history)).
+
+### Opening a portable snapshot
+
+`run-snapshot-first-edit-bench.mjs` writes one EGWP1 snapshot per dataset and
+then measures every lane in a fresh process per sample; see
+[Snapshot first-edit latency](./README.md#snapshot-first-edit-latency). The
+rows for both commits come from one run of the command above with an `--impl`
+for each build, which alternates them on the same snapshot bytes. The
+`prepare()` rows come from the same driver with
+`--kinds prepared-local,trusted-local`. Medians of 3:
+
+| Scenario                                                    |          S1 |          S2 |          S3 |           C1 |           C2 |           A1 |            A2 |
+| ----------------------------------------------------------- | ----------: | ----------: | ----------: | -----------: | -----------: | -----------: | ------------: |
+| Decode, then `fromPortableSnapshot`                         |      6.8 ms |      4.5 ms |      4.3 ms |      10.9 ms |      11.5 ms |       1.7 ms |        5.4 ms |
+| First local edit, without `prepare()`                       |      313 ms |      242 ms |      350 ms |       1.36 s |       1.39 s |       815 ms |        1.07 s |
+| `70cc242`                                                   |      304 ms |      219 ms |      344 ms |       2.26 s |       2.50 s |       1.88 s |        4.34 s |
+| `prepare()`                                                 |      322 ms |      249 ms |      373 ms |       1.40 s |       1.38 s |       861 ms |        1.09 s |
+| Longest task while preparing                                |       19 ms |       25 ms |       46 ms |        43 ms |        64 ms |        30 ms |         62 ms |
+| `prepare()` of a trusted snapshot                           |       49 ms |       57 ms |       88 ms |       130 ms |       183 ms |        48 ms |         48 ms |
+| First edit concurrent at depth 1,000, without `prepare()`   |      340 ms |      230 ms |      356 ms |       1.48 s |       1.35 s |       823 ms |        1.67 s |
+| `70cc242`                                                   |      342 ms |      242 ms |      379 ms |       2.45 s |       2.40 s |       1.95 s |       10.94 s |
+| Edit concurrent at depth 1,000 after a cold load, 1st / 2nd | 17 / 3.4 ms | 11 / 4.5 ms | 13 / 4.9 ms | 8.5 / 1.4 ms | 9.1 / 1.9 ms | 8.6 / 1.4 ms |  654 / 3.8 ms |
+| `70cc242`                                                   | 35 / 7.6 ms | 34 / 7.4 ms | 29 / 5.0 ms |  30 / 3.8 ms |  30 / 3.8 ms |  31 / 3.6 ms | 6.24 / 6.16 s |
+
+Once the first edit has paid for the decode and the proof replay, a local edit
+takes about 0.1 ms. After its first concurrent edit, A2 keeps the 348,820
+events that edit replayed as its replay cache, 44 MiB more heap after GC than
+`70cc242` keeps, so the second concurrent edit costs 3.8 ms instead of
+another replay.
+
+### Memory
+
+With `--apply-only`, `--memory` applies each trace again in a separate
+`node --expose-gc` worker and reports what dropping the replica frees after
+GC: `replicaHeapBytes` plus `replicaArrayBufferBytes`.
+
+| Dataset | Retained | Bytes per event | `70cc242` |
+| ------- | -------: | --------------: | --------: |
+| S1      |   2.2 MB |             2.8 |   14.7 MB |
+| S2      |   3.8 MB |             3.4 |   21.1 MB |
+| S3      |   5.1 MB |             2.2 |   43.3 MB |
+| C1      |  11.9 MB |            18.2 |   39.6 MB |
+| C2      |  16.2 MB |            26.7 |   46.3 MB |
+| A1      |   3.8 MB |             4.1 |   28.9 MB |
+| A2      |   2.3 MB |             3.3 |   28.1 MB |
+
+At `70cc242`, every C and A replica held exactly 25 MiB of array buffers, and
+the S replicas 13–40 MB.
+
+### Phase 6 gates
+
+`--phase6-gates` thresholds were calibrated on 2026-07-12 with Node v24.12.0
+on an Apple M1 from three S1 operation runs at 1,000, 2,000, and 4,000 events.
+They constrain portable bytes, encode, decode, lazy restore, explicit
+materialization, and heap. `--phase6-gates` and `--phase6-gates --memory` both
+pass on the machine above. Full S1/S2/S3/A1 operation traces are intentionally
 not gated yet: their 779k-2.34m atomic-event workloads need separate
-fixed-machine baselines, and the historical patch/native numbers below are not
-valid thresholds for them.
+fixed-machine baselines, and the historical patch/native numbers under
+[History](#history) are not valid thresholds for them.
 
-Current local baseline for patch-level raw ingest on this Mac / Node v24:
+### History
+
+The results below are kept as recorded. Their command strings are preserved
+as run, so some name scripts or paths that no longer exist. Bare `snapshot*`
+names in them refer to the native `EGWS1` resume-state extension, not the
+portable `EGWP1` format. Most of the June 2026 results use patch-level
+conversion, which collapses each inserted string into one event; they are not
+comparable with the keystroke-granularity baselines above.
+
+#### 2026-10-01: start of the second performance round (`70cc242`, #972)
+
+Analysis A of #972 measured `70cc242` on a 4 vCPU Intel Xeon (2.1 GHz) Linux
+VM with 15 GB RAM, Node v22.22.0 and rustc 1.97. Cold merge of the full
+history, median ms:
+
+| Dataset |    Events | DT `merge_norm` | Yjs `applyUpdateV2` | Decode | Replay | `applyCausalBatch`, whole trace | `applyCausalBatch`, 4,096 / batch |
+| ------- | --------: | --------------: | ------------------: | -----: | -----: | ------------------------------: | --------------------------------: |
+| S1      |   779,334 |             4.1 |                  93 |     36 |    204 |                             506 |                               477 |
+| S2      | 1,104,627 |             6.2 |                 144 |     45 |    118 |                             448 |                               523 |
+| S3      | 2,339,471 |             7.9 |                 125 |     80 |    189 |                           1,208 |                             1,253 |
+| C1      |   651,950 |             113 |                 143 |     82 |  1,813 |                           3,336 |                            10,626 |
+| C2      |   608,150 |             157 |                 101 |    106 |  1,982 |                           3,469 |                            11,934 |
+| A1      |   947,337 |            18.2 |                 153 |     42 |  1,186 |                           3,218 |                            13,051 |
+| A2      |   697,638 |            53.0 |                 128 |     39 |  2,205 |                           3,996 |                            18,904 |
+
+DT (built from the paper's `tools/diamond-types`, run under `taskset 0x1`) and
+Yjs are warm medians. SoftMaple decode and replay of an EGW4 graph are warm
+medians of 5 iterations per process; `applyCausalBatch` is one cold run per
+process, 3–5 processes.
+
+| Scenario                                                    |          S1 |          C1 |          C2 |          A1 |            A2 |
+| ----------------------------------------------------------- | ----------: | ----------: | ----------: | ----------: | ------------: |
+| 4,096-event batches vs whole trace                          |       0.94× |       3.19× |       3.44× |       4.06× |         4.73× |
+| `applyRemoteEvent`, µs per event (first 100k events)        |         9.2 |        24.2 |        24.5 |        24.5 |          33.9 |
+| First local edit after `fromPortableSnapshot`               |      249 ms |      2.03 s |      2.20 s |      1.53 s |        3.12 s |
+| Concurrent edit at depth 1,000 after a cold load, 1st / 2nd | 27 / 7.5 ms | 26 / 2.6 ms | 38 / 3.4 ms | 28 / 2.8 ms | 4.73 / 4.71 s |
+| Retained memory after a whole-trace receive                 |     14.7 MB |     39.6 MB |     46.3 MB |     28.9 MB |       28.1 MB |
+
+Analysis B of #972, on an Apple M1 with Node v24.12.0, measured times 1.6–2.4×
+lower than Analysis A.
+
+#### June 2026: patch-level ingest and Phase 6 snapshots (Apple M1, Node v24.12.0)
+
+Undated patch-level raw-ingest baseline, recorded with the 2026-06-04 results:
 
 ```text
 S1: ~8.2s total
@@ -809,7 +1030,7 @@ C1 max-txns 3000: mean total 1.57s, mean apply 1.50s, native load 0.048s
 C2 max-txns 3000: mean total 1.52s, mean apply 1.44s, native load 0.033s
 ```
 
-The same optimized path now makes bounded 10k concurrent samples practical as
+The same optimized path then made bounded 10k concurrent samples practical as
 smoke checks:
 
 ```text
@@ -818,34 +1039,28 @@ C1 max-txns 10000: total 16.37s, apply 16.27s, native load 0.244s
 C2 max-txns 10000: total 14.85s, apply 14.76s, native load 0.223s
 ```
 
-Full `C1`/`C2` patch-level runs are still not routine checks; bounded 10k
-samples are now the larger smoke profile, while bounded 3k samples remain the
-fast regression profile.
-
-If inserted strings are split into single-character events, the event count rises
-to paper keystroke scale. A bounded `A2` sample of 300 txns / 46,540 events now
-takes about 11 seconds locally; 600 txns / 95,257 events takes about 130
-seconds. A `--max-events 100000` probe exceeded two minutes and was stopped, so
-keep `A2 --max-txns 300 --granularity operation` as the routine faithful smoke
-test. Do not start with full operation-level mode for routine regression checks.
-
-Yjs native baseline should be much faster:
-
-```text
-remote-time benchmark: usually 1-3 minutes
-memory benchmark: usually 10-60 seconds
-```
-
-This difference is expected because Yjs is loading precomputed native binary
-updates, while raw SoftMaple ingest is importing JSON and applying TypeScript
-event objects one by one.
+At keystroke granularity, a bounded `A2` sample of 300 txns / 46,540 events
+took about 11 seconds then, 600 txns / 95,257 events about 130 seconds, and a
+`--max-events 100000` probe was stopped after two minutes. The whole of A2,
+697,638 events, now receives in under a second; see
+[Expected Runtime](#expected-runtime).
 
 ## Reporting Guidance
 
 Use this wording in reports:
 
-- "SoftMaple raw ingest" for JSON trace conversion plus `applyRemoteEvent`.
-- "SoftMaple native load" for `deserialize` or binary codec load.
+- "SoftMaple raw ingest" for trace conversion plus a public receive API. Name
+  the API (`applyCausalBatch`, `applyRemoteEvents` or `applyRemoteEvent`) and
+  the batch size.
+- "SoftMaple native load" for EGW4 decode plus the replica's cold replay.
+- "SoftMaple portable snapshot restore" for EGWP1 decode plus
+  `fromPortableSnapshot(...)` alone. Restore defers decoding the history and
+  the proof replay, so a time to a replica ready to edit must also include
+  `prepare()` or the first edit, as `readyToEditMs` in
+  `run-snapshot-first-edit-bench.mjs` does.
+- "SoftMaple native snapshot restore" for EGWS1 decode plus
+  `fromNativeSnapshot(...)`, reported separately; it too leaves the graph
+  encoded until something reads it.
 - "Yjs native update" for `Y.applyUpdateV2` on `datasets/*.yjs`.
 - "Paper DT" for the Rust Diamond Types results in `egwalker-paper/results`.
 
@@ -881,55 +1096,59 @@ Done:
    and delete-target records; snapshot restore reports `snapshotFullReplays=0`.
 9. Native snapshots persist retained critical checkpoints and restore them for
    bounded concurrent remote events after snapshot load.
-10. The Phase 0 guardrail suite plus A2 300-txn operation smoke has current
-    snapshot decode/restore/heap data from 2026-06-05.
+10. The Phase 0 guardrail suite plus A2 300-txn operation smoke recorded
+    snapshot decode/restore/heap data on 2026-06-05.
 11. PR #788 completed the main Phase 6 runtime-state wire-format work:
     `EGWR2` versioning, id/replica tables, delta-varint columns, UTF-8 content
     blobs, flat delete-target refs/offsets, lazy public compatibility getters,
     and legacy runtime-state fallback when bytes collide with the new prefix.
-12. The 2026-06-08 S1/S2/S3/A1 full patch smoke has current snapshot
+12. The 2026-06-08 S1/S2/S3/A1 full patch smoke recorded snapshot
     decode/restore/heap data after compact runtime-state adoption.
 13. The remaining old Phase 6 split items are implemented: large cold native
     snapshot header/graph sections can use `EGWC1` LZ4 wrapping, the runtime
     state path stays hot/uncompressed as `EGWR2`. Its historical patch/native
-    gate numbers are retained below only as dated results, not reused for
-    portable operation workloads.
+    gate numbers are retained under [History](#history) only as dated
+    results, not reused for portable operation workloads.
 14. `native-snapshot-suffix.property.test.ts` now compares compact snapshot
     restore plus random local/remote suffixes against a full replay of the
     final event graph. This caught and fixed a non-empty-initial-text case
     where snapshot runtime records were taken from a live engine whose current
     version did not match the graph frontier.
 15. The 2026-06-08 full `--phase6-gates --memory` run passed. Full-trace
-    restore is now about 100-200ms across S1/S2/S3/A1, bounded C1/C2 restore is
-    sub-10ms, and A2 300-txn operation restore is about 9ms.
+    patch-level restore was about 100-200ms across S1/S2/S3/A1, bounded C1/C2
+    restore was sub-10ms, and A2 300-txn operation restore was about 9ms.
 16. The final Phase 6 pass removes avoidable `Uint8Array` copies in native
     snapshot section decode, decodes zigzag-delta runtime columns directly into
     typed arrays, preserves runtime content bytes as views, and defers restored
     event indexes until divergent edits need them.
 17. The 2026-06-09 tightened full `--phase6-gates --memory` run passed. S3
-    snapshot decode is now about 0.79s in the main process, restore is about
-    0.19s, snapshot decode heap is about 89MB, restore heap is about 135MB, and
+    patch-level snapshot decode was about 0.79s in the main process, restore
+    about 0.19s, snapshot decode heap about 89MB, restore heap about 135MB, and
     `snapshotFullReplays=0` across the gate suite.
 18. Current benchmark output separates paper-style portable `EGWP1` bytes,
     decode, lazy restore, explicit materialization, and heap from optional
     native `EGWS1` resume-state metrics. Calibrated S1 1k/2k/4k operation gates
     cover every portable stage; native replay counters remain a resume-state
     regression signal. Full operation gates remain disabled until measured.
+19. Every lane converts all seven datasets at keystroke granularity and can
+    replay them in full, C1, C2 and A2 included, and every unbounded run
+    validates its final text. [Expected Runtime](#expected-runtime) has
+    2026-10-07 baselines for receive, per-event receive, cold replay,
+    portable-snapshot first edits and retained memory.
 
 Next:
 
-1. Decide whether to attempt full `C1`/`C2` patch-level runs as a separate
-   long-run profile. They are no longer blocked by the 10k smoke cost, but they
-   should still stay out of routine regression checks until full runtime is
-   measured.
-2. Profile the optimized `C1`/`C2` path before the next runtime change. The
-   remaining hot spots are now spread across insert handling, indexed sequence
-   updates, and `diffVersions`, not a single obvious full-history scan.
-3. Decide whether `A2` should support a faster faithful mode than full
-   operation-level conversion. The current operation-level path is correct for
-   bounded samples but grows too quickly past the 300-txn smoke test.
-4. Keep `--memory` in the benchmark loop for future snapshot/runtime work; S3
-   decode heap and restore heap are the most useful regression signals.
+1. Gate full traces. `--phase6-gates` still covers only 1k–4k-event prefixes
+   of S1; the 2026-10-07 baselines are a starting point for fixed-machine
+   gates on S1–A2.
+2. Make the JSON `serialize()` measurement of the default persistence lane
+   opt-in. It measures a debugging format, most of the lane's wall time falls
+   outside its timers (one S1 run takes 34–47 s, about 5 s of it timed), and
+   the lane peaks at 6.2 GiB of RSS on S3 where the other lanes stay within
+   2 GiB.
+3. Keep `--memory` in the benchmark loop for runtime work: the retained
+   memory of the apply lane and the heap and array-buffer deltas of the
+   `--native-only` lane are the most useful regression signals.
 
 ### Portable validation counters
 

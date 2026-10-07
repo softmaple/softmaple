@@ -47,17 +47,18 @@ The package is organized around the paper's prepare/effect model:
                 │                                           │
              graph/                                      engine/
       persistent event DAG                        prepare/effect state
-        frontier versions                          ranked B-tree index
-    causal diff · topo order                       delete-target index
-      columnar codec (§3.8)                       critical checkpoints
+   packed prefix · TailEventLog                    ranked B-tree index
+        frontier versions                          delete-target index
+    causal diff · topo order                      critical checkpoints
+   EGW4 columnar codec (§3.8)
                 │                                           │
                 └─────────────────────┬─────────────────────┘
                                       │
                                 document text
-                        serialize() · native snapshot
+                     portable snapshot · native snapshot
 ```
 
-- `graph/`: persistent event graph, frontier versions, causal expansion/diff, columnar codec.
+- `graph/`: persistent event graph stored as columns, frontier versions, causal expansion/diff, EGW4 columnar codec.
 - `engine/`: prepare/effect replay state, ranked B-tree index mapping, critical checkpoints, partial replay.
 - `core/`: public API and thin walker coordinator.
 - `types/`: public TypeScript types.
@@ -67,6 +68,32 @@ derived: they can be discarded at a critical version and rebuilt, which is what
 makes partial replay possible. A native snapshot may additionally persist that
 derived cache for faster restore, but it never replaces the graph as the source
 of truth. `graph/` never imports `engine/`.
+
+### Event graph storage
+
+The event graph keeps no object per event. Its events, numbered by insertion
+rank, are stored in two parts:
+
+- A packed prefix: immutable columns decoded from EGW4 bytes, or built from
+  the first batch of remote events an empty graph receives. While the whole
+  history is one exact causal chain, later chains extend these columns in
+  place.
+- `TailEventLog`, after the prefix: every other event, such as local edits,
+  remote events and later batches. Appending an event copies each field into
+  typed columns: its ID into per-replica runs, its operation into numeric
+  columns, its inserted text into chunks of about 4,096 code units and its
+  parents into insertion ranks. The numeric columns seal every 1,024 events
+  into constant-step spans, with literal blocks for irregular values, so a
+  local keystroke retains a few dozen bytes.
+
+Large causal batches prepare the same sealed columns in `finish()` and
+transfer them after the receive commits; replay uses dense columns until then.
+Random reads decode individual spans, suffix replay reads only its suffix, and
+full repacking can materialize dense columns again. Reading an event, for
+example through `getEvent`, `exportEventGraph` or `serialize()`, builds a
+`GraphEvent` from the columns; an order a caller asks for, such as
+`getTopologicalOrder()`, keeps its events until the graph changes. None of
+this changes the EGW4 wire format.
 
 ### Position in the wider stack
 
@@ -84,19 +111,40 @@ binding. This package must not import an editor framework, awareness, or any
 host runtime; see
 [`docs/design/collaboration-layers.md`](../../docs/design/collaboration-layers.md).
 
-The portable `serialize()` format contains plain text plus the event graph and
-does not persist CRDT replay records. `EgWalkerReplica` does cache an engine
-between edits, and the optional native-snapshot API can persist that cache for
-faster restore; those are implementation extensions rather than the paper's
-minimal persistent-state model. `createNativeSnapshot()` defaults to reusing
-only resume state that is already available, so taking a snapshot never causes
-an implicit full-history replay. Pass `{ resumeCache: "none" }` to exclude the
-complete extension (including checkpoints), or `{ resumeCache: "rebuild" }`
-to explicitly rebuild missing sequence/delete state. The snapshot holds the
-live graph encoded once as EGW4; its `eventGraph` objects are decoded only
-when read, and `NativeSnapshotCodec.encode` writes those bytes without
-rebuilding the graph while the snapshot is unchanged. A snapshot built or
-edited outside the replica has its `eventGraph` rebuilt and checked first.
+### Persistent state
+
+Store a document as a portable snapshot. `createPortableSnapshot()` holds the
+plain text and the event graph, `PortableSnapshotCodec` encodes it as EGWP1
+bytes with the graph in EGW4, and `EgWalkerReplica.fromPortableSnapshot` opens
+it again (see [Opening a portable snapshot](#opening-a-portable-snapshot)). It
+does not persist CRDT replay records. On the paper's keystroke traces, the
+EGW4 graph a snapshot holds is 1.01–1.06× the size of Diamond Types' `.dt`
+files on the sequential and asynchronous traces and 1.18–1.28× on the
+concurrent ones; see
+[`PAPER_BENCHMARKS.md`](../bench/PAPER_BENCHMARKS.md#json-serialize-payloads).
+
+`EgWalkerReplica` does cache an engine between edits, and the optional
+native-snapshot API can persist that cache for faster restore; those are
+implementation extensions rather than the paper's minimal persistent-state
+model. `createNativeSnapshot()` defaults to reusing only resume state that is
+already available, so taking a snapshot never causes an implicit full-history
+replay. Pass `{ resumeCache: "none" }` to exclude the complete extension
+(including checkpoints), or `{ resumeCache: "rebuild" }` to explicitly rebuild
+missing sequence/delete state. The snapshot holds the live graph encoded once as
+EGW4; its `eventGraph` objects are decoded only when read, and
+`NativeSnapshotCodec.encode` writes those bytes without rebuilding the graph
+while the snapshot is unchanged. A snapshot built or edited outside the replica
+has its `eventGraph` rebuilt and checked first.
+
+`serialize()` and `deserialize()`, on `EgWalkerReplica` and on `EventGraph`,
+write and read JSON: the text and one object per event, with its ID, its
+parents' IDs, its operation and its timestamp. Use JSON for debugging, tests
+and interop with tools that read it, on small documents, not for storage. On
+the paper traces it takes 122–459 MB, about 190–200 bytes per keystroke and
+150–600 times the EGW4 graph, and building it creates an object for every
+event. S3's 459 MB is 85% of the longest string V8 can build, so a somewhat
+longer history cannot be serialized at all. `EgWalkerReplica.deserialize()`
+also replays the whole history.
 
 ### Paper compatibility boundary
 
@@ -111,27 +159,28 @@ has a few different engineering boundaries:
 - The replica retains its replay engine for fast incremental edits and keeps up
   to 32 materialized critical checkpoints. The paper permits discarding this
   internal CRDT state at critical versions.
-- The live event graph uses a packed prefix and an appendable columnar tail.
-  Tail numeric columns seal every 1,024 events into constant-step spans, with
-  literal blocks for irregular values. Large causal batches prepare the same
-  resident representation in `finish()` and transfer it after receive commits;
-  replay uses dense columns until then. Random reads decode individual spans,
-  suffix replay reads only its suffix, and full repacking can materialize dense
-  columns again. The EGW4 wire format is unchanged.
+- The live event graph is stored as columns, not only encoded as them: a
+  packed prefix followed by `TailEventLog` (see
+  [Event graph storage](#event-graph-storage)).
 - Concurrent inserts are placed by the paper's linear scan, within a budget
   of two probes per sequence record. A scan that would overrun it builds
   `FugueOrderIndex`, which places every later insert of that replay in
   logarithmic time, so many concurrent inserts at one position stay
   O(n log n). The unbounded scan remains as a differential-test oracle.
 
-Treat `serialize()` as the paper-aligned state boundary and the columnar codec
-as the Section 3.8 physical encoding. Native snapshots and retained runtime
-caches are optional performance extensions.
+Treat the portable snapshot as the paper-aligned state boundary and EGW4 as
+the Section 3.8 physical encoding. Native snapshots and retained runtime
+caches are optional performance extensions, and JSON `serialize()` is a
+debugging format.
 
 ## Usage
 
 ```typescript
-import { createEgWalkerReplica, OPERATION_TYPE } from "@softmaple/eg-walker";
+import {
+  createEgWalkerReplica,
+  OPERATION_TYPE,
+  PortableSnapshotCodec,
+} from "@softmaple/eg-walker";
 
 const replica = createEgWalkerReplica("replica-1");
 
@@ -144,12 +193,15 @@ replica.applyLocalOperation({
 replica.applyLocalOperation({
   type: OPERATION_TYPE.DELETE,
   index: 7,
-  length: 6,
+  length: 5,
 });
 
 console.log(replica.getText()); // "Hello, !"
 
-const serialized = replica.serialize();
+// Save the text and its history as EGWP1 bytes.
+const bytes = new PortableSnapshotCodec().encode(
+  replica.createPortableSnapshot(),
+);
 ```
 
 ## Opening a portable snapshot
@@ -159,7 +211,7 @@ checks the snapshot header and serves the text, but leaves the event graph
 encoded. Before the replica can apply an edit or a remote event, it has to
 decode the graph and, unless the snapshot is trusted, replay the whole history
 once to prove that the text matches it. That proof costs about as much as a
-cold load of the history: 0.2–3 s on the paper traces. Run it before the user
+cold load of the history: 0.2–1.5 s on the paper traces. Run it before the user
 can type:
 
 ```typescript
@@ -176,12 +228,14 @@ enableEditing(); // edits now cost what they cost on a live replica
 `prepare()` works in slices of about 8 ms (`sliceMs`) and yields to the host
 between them (`yieldToHost`; by default `scheduler.yield()`, `setImmediate`, a
 `MessageChannel` message or `setTimeout`), so it does not hold up input or
-rendering. Text reads work while it runs. An edit or remote event that arrives
-first does the remaining work synchronously, as it would without `prepare()`,
-and the promise settles with it. A snapshot whose text does not match its
-history makes `prepare()` reject before any local event is created, and the
-replica stays as restored. Pass `signal` to stop preparing, for example when
-the document closes. `isPrepared()` tells whether the work is done.
+rendering. A slice ends after the step that reaches its deadline, so it can
+run over: on the paper traces the longest task is 19–64 ms. Text reads work
+while it runs. An edit or remote event that arrives first does the remaining
+work synchronously, as it would without `prepare()`, and the promise settles
+with it. A snapshot whose text does not match its history makes `prepare()`
+reject before any local event is created, and the replica stays as restored.
+Pass `signal` to stop preparing, for example when the document closes.
+`isPrepared()` tells whether the work is done.
 
 The proof, and the replay state it leaves, belong to the JavaScript realm that
 ran it. It cannot run in a Worker and be handed to the main thread. To keep it
@@ -267,7 +321,7 @@ They run as part of the normal test suite:
 pnpm --filter @softmaple/eg-walker test
 
 # Run only property tests.
-pnpm --filter @softmaple/eg-walker test -- --run src/test/property
+pnpm --filter @softmaple/eg-walker test --run src/test/property
 
 # Increase runs for a deeper sweep before a release.
 EG_WALKER_PROPERTY_RUNS=500 pnpm --filter @softmaple/eg-walker test

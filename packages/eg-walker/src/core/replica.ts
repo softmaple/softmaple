@@ -608,7 +608,12 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Serialize the document state (text + event graph)
+   * The text and the event graph as JSON (see `EventGraph.serialize`).
+   *
+   * For debugging, tests and interop on small documents, not for storage: it
+   * builds an object for every event and is two to three orders of magnitude
+   * larger than EGW4 on the paper's keystroke traces. Store a document with
+   * {@link createPortableSnapshot} and `PortableSnapshotCodec` instead.
    */
   serialize(): { text: string; eventGraph: SerializedGraphOutput } {
     const graph = this.ensureEventGraph();
@@ -699,6 +704,11 @@ export class EgWalkerReplica {
     }
   }
 
+  /**
+   * Rebuild a replica from {@link serialize} JSON by replaying its whole
+   * history. Open a stored portable snapshot with
+   * {@link fromPortableSnapshot} instead.
+   */
   static deserialize(
     serialized: {
       text: string;

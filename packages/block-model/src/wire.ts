@@ -612,7 +612,7 @@ const assertOptionalNullableSafeInteger = (
 const optionalString = (value: unknown): boolean =>
   value === undefined || typeof value === "string";
 
-const assertWellFormedUtf16 = (text: string, label: string): void => {
+export const assertWellFormedUtf16 = (text: string, label: string): void => {
   for (let index = 0; index < text.length; index++) {
     const current = text.charCodeAt(index);
     if (current >= 0xd800 && current <= 0xdbff) {

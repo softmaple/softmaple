@@ -13,6 +13,7 @@ import {
   type RichTextEventBatch,
 } from "../index";
 import { materializeBlockState } from "../materialize";
+import { ReplicaState } from "../replica-state";
 import { toGraphEvent } from "../wire";
 import { rebuildFromBatches } from "./rebuild-oracle";
 
@@ -892,6 +893,149 @@ describe("BlockReplica", () => {
     });
     expect(left.getDocument()).toEqual(right.getDocument());
     expect(left.getDocument().blocks[0]?.text).toMatch(/^A(?:xy|yx)$/);
+  });
+
+  it.each([
+    {
+      where: "typed into a kept block",
+      body: "B😀d\uDE00y",
+      added: "New",
+      error: "text contains an unpaired low surrogate",
+    },
+    {
+      where: "left by deleting half of a pair",
+      body: "B\uD83Ddy",
+      added: "New",
+      error: "text contains an unpaired high surrogate",
+    },
+    {
+      where: "in a new block",
+      body: "B😀dy",
+      added: "N\uD83D",
+      error: "text contains an unpaired high surrogate",
+    },
+  ])("should reject a lone surrogate $where before replaceDocument edits anything", ({
+    body,
+    added,
+    error,
+  }) => {
+    // Arrange: retyping the title, adding a block and dropping one all
+    // come before the invalid text.
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "Draft");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "dropped",
+        type: "paragraph",
+        text: "Dropped",
+      });
+      transaction.insertBlock("dropped", {
+        id: "body",
+        type: "paragraph",
+        text: "B😀dy",
+      });
+    });
+    const documentBefore = replica.getDocument();
+    const eventsBefore = replica.exportEvents();
+    const input: BlockDocumentInput = {
+      blocks: [
+        { id: BOOTSTRAP_BLOCK_ID, type: "h1", text: "Title" },
+        { type: "paragraph", text: added },
+        { id: "body", type: "paragraph", text: body },
+      ],
+    };
+    const inserts = vi.spyOn(ReplicaState.prototype, "insert");
+    const deletes = vi.spyOn(ReplicaState.prototype, "delete");
+    const rebuilds = vi.spyOn(ReplicaState.prototype, "integrateBatches");
+
+    // Act / Assert
+    try {
+      expect(() =>
+        replica.transact((transaction) => {
+          transaction.replaceDocument(input);
+        }),
+      ).toThrow(error);
+      expect(inserts).not.toHaveBeenCalled();
+      expect(deletes).not.toHaveBeenCalled();
+      expect(rebuilds).not.toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(replica.getDocument()).toEqual(documentBefore);
+    expect(replica.exportEvents()).toEqual(eventsBefore);
+  });
+
+  it.each([
+    { into: "the kept block before it", added: [] },
+    {
+      into: "a new block before it",
+      added: [{ type: "paragraph" as const, text: "Fresh" }],
+    },
+  ])("should replace the text that dropping a block moves into $into", ({
+    added,
+  }) => {
+    // Arrange: " tail" is joined to "dropped", so deleting "dropped" hands
+    // it to the visible block before it.
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertText(BOOTSTRAP_BLOCK_ID, 0, "Intro");
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "dropped",
+        type: "paragraph",
+        text: "Old tail",
+      });
+    });
+    replica.transact((transaction) => {
+      transaction.joinBlock(transaction.splitBlock("dropped", 3));
+    });
+    const input: BlockDocumentInput = {
+      blocks: [
+        { id: BOOTSTRAP_BLOCK_ID, type: "paragraph", text: "Intro" },
+        ...added,
+      ],
+    };
+
+    // Act
+    replica.transact((transaction) => {
+      transaction.replaceDocument(input);
+    });
+
+    // Assert
+    expect(replica.getDocument().blocks.map(({ text }) => text)).toEqual(
+      input.blocks.map(({ text }) => text),
+    );
+  });
+
+  it("should reject reordering kept blocks in replaceDocument", () => {
+    // Arrange
+    const replica = new BlockReplica("alice");
+    replica.transact((transaction) => {
+      transaction.insertBlock(BOOTSTRAP_BLOCK_ID, {
+        id: "first",
+        type: "paragraph",
+        text: "First",
+      });
+      transaction.insertBlock("first", {
+        id: "second",
+        type: "paragraph",
+        text: "Second",
+      });
+    });
+    const documentBefore = replica.getDocument();
+
+    // Act / Assert
+    expect(() =>
+      replica.transact((transaction) => {
+        transaction.replaceDocument({
+          blocks: [
+            { id: BOOTSTRAP_BLOCK_ID, type: "paragraph", text: "" },
+            { id: "second", type: "paragraph", text: "Second" },
+            { id: "first", type: "paragraph", text: "First" },
+          ],
+        });
+      }),
+    ).toThrow("replaceDocument does not support block reordering");
+    expect(replica.getDocument()).toEqual(documentBefore);
   });
 
   it("should defer block anchors until the creating event is integrated", () => {

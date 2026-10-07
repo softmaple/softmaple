@@ -9,11 +9,12 @@ import {
   METADATA_MARKER,
 } from "./constants";
 import { ReplicaState } from "./replica-state";
-import { diffText } from "./text-diff";
+import { diffText, type TextChange } from "./text-diff";
 import type {
   ApplyRichTextEventsResult,
   Block,
   BlockAnchor,
+  BlockAttributePatch,
   BlockDocument,
   BlockDocumentInput,
   BlockFieldPatch,
@@ -33,6 +34,7 @@ import type {
 } from "./types";
 import {
   assertFieldPatch,
+  assertWellFormedUtf16,
   BOOTSTRAP_BATCH,
   cloneBatch,
   compareIds,
@@ -454,6 +456,7 @@ class BlockTransactionContext implements BlockTransaction {
   insertBlock(afterBlockId: BlockId | null, input: BlockInput): BlockId {
     this.assertUsable();
     assertBlockInput(input);
+    assertWellFormedUtf16(input.text, "text");
     const after =
       afterBlockId === null
         ? this.state.firstVisibleBlock()
@@ -591,20 +594,26 @@ class BlockTransactionContext implements BlockTransaction {
     }
     next.blocks.forEach(assertBlockInput);
     const before = this.state.document().blocks;
-    const existingIndex = new Map(
-      before.map((block, index) => [block.id, index]),
-    );
+    const knownIndexes = this.findKnownBlocks(next.blocks, before);
+    const textPlans = next.blocks.map((input, index) => {
+      const knownIndex = knownIndexes[index];
+      return planText(
+        knownIndex === undefined ? "" : before[knownIndex]!.text,
+        input.text,
+      );
+    });
+    const eventsBefore = this.events.length;
     const selectedIds: BlockId[] = [];
-    const selected = new Set<BlockId>();
+    const kept = before.map(() => false);
     const inputIds = new Map<string, BlockId>();
     let lastExistingIndex = -1;
 
     for (let index = 0; index < next.blocks.length; index++) {
       const input = next.blocks[index]!;
       let stableId: BlockId;
-      const knownIndex = input.id ? existingIndex.get(input.id) : undefined;
+      const knownIndex = knownIndexes[index];
       if (index === 0) {
-        const first = this.state.document().blocks[0]!;
+        const first = before[0]!;
         if (input.id !== undefined && input.id !== first.id) {
           throw new Error(
             `replaceDocument cannot replace first block ID ${first.id} with ${input.id}`,
@@ -626,11 +635,12 @@ class BlockTransactionContext implements BlockTransaction {
           marks: [],
         });
       }
-      if (selected.has(stableId)) {
-        throw new Error(`replaceDocument contains duplicate block ${stableId}`);
+      // Kept indexes only increase and new blocks get unused IDs, so no
+      // block is selected twice.
+      if (knownIndex !== undefined) {
+        kept[knownIndex] = true;
       }
       selectedIds.push(stableId);
-      selected.add(stableId);
       if (input.inputId !== undefined) {
         if (inputIds.has(input.inputId)) {
           throw new Error(`Duplicate transaction inputId ${input.inputId}`);
@@ -639,48 +649,75 @@ class BlockTransactionContext implements BlockTransaction {
       }
     }
 
-    for (const block of before) {
-      if (block.id !== BOOTSTRAP_BLOCK_ID && !selected.has(block.id)) {
+    before.forEach((block, index) => {
+      if (!kept[index] && block.id !== BOOTSTRAP_BLOCK_ID) {
         this.deleteBlock(block.id);
       }
-    }
+    });
 
     for (let index = 0; index < next.blocks.length; index++) {
       const input = next.blocks[index]!;
       const stableId = selectedIds[index]!;
-      const parentId = resolveInputParent(input, inputIds);
-      const current = this.requireBlock(stableId);
-      const desiredFields = normalizeFields(input.type, {
-        ...input.attrs,
-        parentId,
-      });
-      if (
-        current.type !== desiredFields.type ||
-        !sameBlockAttributes(current.attrs, desiredFields)
-      ) {
-        this.setBlock(stableId, desiredFields);
-      }
-      const textChange = diffText(current.text, input.text);
-      if (textChange !== null) {
-        if (textChange.from < textChange.oldTo) {
-          this.deleteText(stableId, textChange.from, textChange.oldTo);
-        }
-        if (textChange.insert.length > 0) {
-          this.insertText(stableId, textChange.from, textChange.insert);
-        }
-      }
-      const refreshed = this.requireBlock(stableId);
-      const desiredMarks = input.marks ?? [];
-      if (!sameMarks(refreshed.marks, desiredMarks)) {
-        for (const mark of refreshed.marks) {
-          this.setMark(stableId, mark.from, mark.to, mark.kind, null);
-        }
-        for (const mark of desiredMarks) {
-          this.applyInputMark(stableId, mark);
-        }
-      }
+      const knownIndex = knownIndexes[index];
+      // `before` stays current until this replacement edits something.
+      const current =
+        knownIndex !== undefined && this.events.length === eventsBefore
+          ? before[knownIndex]!
+          : this.requireBlock(stableId);
+      this.updateBlock(
+        current,
+        input,
+        resolveInputParent(input, inputIds),
+        textPlans[index]!,
+      );
     }
     return Object.freeze(selectedIds);
+  }
+
+  /** Bring a block's fields, text and marks in line with its input. */
+  private updateBlock(
+    current: Block,
+    input: BlockInput,
+    parentId: BlockId | null,
+    plan: TextPlan,
+  ): void {
+    const blockId = current.id;
+    let edited = false;
+    if (
+      current.type !== input.type ||
+      !sameBlockAttributes(current.attrs, input.attrs, parentId)
+    ) {
+      this.setBlock(
+        blockId,
+        normalizeFields(input.type, { ...input.attrs, parentId }),
+      );
+      edited = true;
+    }
+    // Deleting a block moves the text joined into it to the block before it,
+    // so diff again when the text is no longer the one planned against.
+    const textChange =
+      current.text === plan.base
+        ? plan.change
+        : diffText(current.text, input.text);
+    if (textChange !== null) {
+      if (textChange.from < textChange.oldTo) {
+        this.deleteText(blockId, textChange.from, textChange.oldTo);
+      }
+      if (textChange.insert.length > 0) {
+        this.insertText(blockId, textChange.from, textChange.insert);
+      }
+      edited = true;
+    }
+    const { marks } = edited ? this.requireBlock(blockId) : current;
+    const desiredMarks = input.marks ?? [];
+    if (!sameMarks(marks, desiredMarks)) {
+      for (const mark of marks) {
+        this.setMark(blockId, mark.from, mark.to, mark.kind, null);
+      }
+      for (const mark of desiredMarks) {
+        this.applyInputMark(blockId, mark);
+      }
+    }
   }
 
   finish(): RichTextEventBatch | null {
@@ -736,6 +773,33 @@ class BlockTransactionContext implements BlockTransaction {
     return this.state.requireVisibleBlock(blockId).block;
   }
 
+  /**
+   * Index in `before` of the block each input keeps, or `undefined` for a new
+   * block. The first input always keeps the first block. Inputs usually keep
+   * the blocks in order, so the block after the previous match is checked
+   * before the ID is looked up.
+   */
+  private findKnownBlocks(
+    inputs: ReadonlyArray<BlockInput>,
+    before: ReadonlyArray<Block>,
+  ): Array<number | undefined> {
+    let previous = 0;
+    return inputs.map((input, index) => {
+      if (index === 0) {
+        return 0;
+      }
+      if (input.id === undefined) {
+        return undefined;
+      }
+      const knownIndex =
+        before[previous + 1]?.id === input.id
+          ? previous + 1
+          : this.state.visibleBlock(input.id)?.index;
+      previous = knownIndex ?? previous;
+      return knownIndex;
+    });
+  }
+
   private assertUnusedBlockId(blockId: string): void {
     if (blockId.length === 0) {
       throw new Error("Block ID cannot be empty");
@@ -774,6 +838,10 @@ const assertMarkValue = (
   }
 };
 
+/**
+ * Check everything but the text itself: `insertBlock` validates all of it,
+ * `replaceDocument` only the parts it inserts.
+ */
 const assertBlockInput = (input: BlockInput): void => {
   if (!isBlockType(input.type)) {
     throw new Error(`Unsupported block type ${String(input.type)}`);
@@ -788,7 +856,6 @@ const assertBlockInput = (input: BlockInput): void => {
     throw new Error("parentInputId cannot be empty");
   }
   assertFieldPatch(input.attrs ?? {});
-  encodeText(input.text);
   for (const mark of input.marks ?? []) {
     if (!isMarkKind(mark.kind)) {
       throw new Error(`Unsupported mark kind ${String(mark.kind)}`);
@@ -804,6 +871,27 @@ const assertBlockInput = (input: BlockInput): void => {
       throw new Error("Input mark range is invalid");
     }
   }
+};
+
+interface TextPlan {
+  /** The text the change was computed against. */
+  readonly base: string;
+  readonly change: TextChange | null;
+}
+
+/**
+ * Diff a block's text before the transaction edits anything, and check the
+ * slice the diff inserts, which is all `insertText` will validate later.
+ * Document text is well-formed, since EG-walker rejects edits between
+ * surrogate halves, and the diff cuts it only between code points, so a lone
+ * surrogate anywhere in `text` ends up in that slice.
+ */
+const planText = (base: string, text: string): TextPlan => {
+  const change = diffText(base, text);
+  if (change !== null) {
+    assertWellFormedUtf16(change.insert, "text");
+  }
+  return { base, change };
 };
 
 const resolveInputParent = (
@@ -825,16 +913,18 @@ const resolveInputParent = (
   return input.attrs?.parentId ?? null;
 };
 
+/** Whether `attrs` equal what `normalizeFields` makes of `patch` and `parentId`. */
 const sameBlockAttributes = (
-  left: Block["attrs"],
-  right: Block["attrs"],
+  attrs: Block["attrs"],
+  patch: BlockAttributePatch | undefined,
+  parentId: BlockId | null,
 ): boolean =>
-  left.parentId === right.parentId &&
-  left.language === right.language &&
-  left.theme === right.theme &&
-  left.start === right.start &&
-  left.value === right.value &&
-  left.checked === right.checked;
+  attrs.parentId === parentId &&
+  attrs.language === (patch?.language ?? null) &&
+  attrs.theme === (patch?.theme ?? null) &&
+  attrs.start === (patch?.start ?? null) &&
+  attrs.value === (patch?.value ?? null) &&
+  attrs.checked === (patch?.checked ?? null);
 
 const sameLinkAttributes = (
   left: LinkAttributes,

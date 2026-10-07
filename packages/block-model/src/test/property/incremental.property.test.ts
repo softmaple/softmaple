@@ -10,6 +10,7 @@ import {
   type Block,
   type BlockAnchor,
   type BlockDocument,
+  type BlockInput,
   type BlockTransaction,
   type BlockType,
   type MarkKind,
@@ -432,6 +433,11 @@ const applyEdit = (
       throw new AbortedEdit();
     }
   });
+  if (operation.kind === "replaceDocument") {
+    expect(replica.getDocument().blocks.map(({ text }) => text)).toEqual(
+      replacementBlocks(operation, document, block).map(({ text }) => text),
+    );
+  }
 };
 
 const applyOperation = (
@@ -526,33 +532,39 @@ const applyOperation = (
       );
       return;
     }
-    case "replaceDocument": {
-      const dropped =
-        document.blocks.length > 1
-          ? document.blocks[
-              1 + (operation.drop % (document.blocks.length - 1))
-            ]!.id
-          : null;
+    case "replaceDocument":
       transaction.replaceDocument({
-        blocks: document.blocks.flatMap((current) => {
-          if (current.id === dropped) {
-            return [];
-          }
-          const kept = {
-            id: current.id,
-            type: current.type,
-            text: current.id === block.id ? operation.text : current.text,
-            attrs: current.attrs,
-            marks: current.id === block.id ? [] : current.marks,
-          };
-          return current.id === block.id && operation.add
-            ? [kept, { type: "paragraph" as const, text: operation.text }]
-            : [kept];
-        }),
+        blocks: replacementBlocks(operation, document, block),
       });
       return;
-    }
   }
+};
+
+/** Drop one block, retype the text of another and maybe add one after it. */
+const replacementBlocks = (
+  operation: Extract<EditOperation, { readonly kind: "replaceDocument" }>,
+  document: BlockDocument,
+  block: Block,
+): BlockInput[] => {
+  const dropped =
+    document.blocks.length > 1
+      ? document.blocks[1 + (operation.drop % (document.blocks.length - 1))]!.id
+      : null;
+  return document.blocks.flatMap((current) => {
+    if (current.id === dropped) {
+      return [];
+    }
+    const kept = {
+      id: current.id,
+      type: current.type,
+      text: current.id === block.id ? operation.text : current.text,
+      attrs: current.attrs,
+      marks: current.id === block.id ? [] : current.marks,
+    };
+    return current.id === block.id && operation.add
+      ? [kept, { type: "paragraph" as const, text: operation.text }]
+      : [kept];
+  });
 };
 
 const deliverEverything = (replicas: ReadonlyArray<BlockReplica>): void => {

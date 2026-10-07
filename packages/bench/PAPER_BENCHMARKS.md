@@ -1052,8 +1052,15 @@ Use this wording in reports:
 - "SoftMaple raw ingest" for trace conversion plus a public receive API. Name
   the API (`applyCausalBatch`, `applyRemoteEvents` or `applyRemoteEvent`) and
   the batch size.
-- "SoftMaple native load" for EGW4 decode plus the replica's cold replay, or
-  for a portable or native snapshot restore.
+- "SoftMaple native load" for EGW4 decode plus the replica's cold replay.
+- "SoftMaple portable snapshot restore" for EGWP1 decode plus
+  `fromPortableSnapshot(...)` alone. Restore defers decoding the history and
+  the proof replay, so a time to a replica ready to edit must also include
+  `prepare()` or the first edit, as `readyToEditMs` in
+  `run-snapshot-first-edit-bench.mjs` does.
+- "SoftMaple native snapshot restore" for EGWS1 decode plus
+  `fromNativeSnapshot(...)`, reported separately; it too leaves the graph
+  encoded until something reads it.
 - "Yjs native update" for `Y.applyUpdateV2` on `datasets/*.yjs`.
 - "Paper DT" for the Rust Diamond Types results in `egwalker-paper/results`.
 

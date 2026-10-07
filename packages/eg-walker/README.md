@@ -127,8 +127,13 @@ concurrent ones; see
 native-snapshot API can persist that cache for faster restore; those are
 implementation extensions rather than the paper's minimal persistent-state
 model. `createNativeSnapshot()` defaults to reusing only resume state that is
-already available, so taking a snapshot never causes an implicit full-history
-replay. Pass `{ resumeCache: "none" }` to exclude the complete extension
+already available, so it does not replay the history to rebuild missing resume
+state. It still needs the decoded history: on a restored replica that is not
+prepared yet, it first runs the preparation synchronously, which for an
+untrusted portable snapshot includes the proof replay (see
+[Opening a portable snapshot](#opening-a-portable-snapshot)). Await `prepare()`
+first to do that work in slices.
+Pass `{ resumeCache: "none" }` to exclude the complete extension
 (including checkpoints), or `{ resumeCache: "rebuild" }` to explicitly rebuild
 missing sequence/delete state. The snapshot holds the live graph encoded once as
 EGW4; its `eventGraph` objects are decoded only when read, and

@@ -105,6 +105,11 @@ export interface EngineRecoveryState {
 // rank lookup and rope edit dominates the shallow final rope rebuild.
 const DEFERRED_CHECKPOINT_TEXT_MIN_EVENTS = 64;
 
+// Freezing a one-shot piece index rebuilds the rope's branches over the
+// whole document. Below this many events, a receive batch edits the
+// persistent rope directly, copying one path per edit.
+const MIN_TRANSIENT_BATCH_EVENTS = 128;
+
 /** Where a chunked packed range replay resumes. */
 interface PackedRangeCursor {
   orderIndex: number;
@@ -583,16 +588,18 @@ export class EgWalkerEngine {
    * @internal Apply an owned receive transaction without per-event text
    * flushes.
    *
-   * The batch's effect edits go to a one-shot piece index that is frozen
-   * into the persistent rope once, at the end, instead of each insert and
-   * delete copying a path of the rope. `firstLocalVersion`, when given, is
-   * the local version of `events[0]`: the batch occupies consecutive local
-   * versions, as the events the caller just appended do, so no ID is looked
-   * up. Should a batch throw, the engine is left mid-transition, as before,
-   * and the caller rebuilds it.
+   * The effect edits of a batch of {@link MIN_TRANSIENT_BATCH_EVENTS} or more
+   * events go to a one-shot piece index that is frozen into the persistent
+   * rope once, at the end, instead of each insert and delete copying a path
+   * of the rope. Freezing rebuilds the rope's branches over the whole
+   * document, so a smaller batch edits the rope directly, as single events
+   * do. `firstLocalVersion`, when given, is the local version of
+   * `events[0]`: the batch occupies consecutive local versions, as the events
+   * the caller just appended do, so no ID is looked up. Should a batch throw,
+   * the engine is left mid-transition, as before, and the caller rebuilds it.
    */
   applyEventBatch(
-    events: ReadonlyArray<GraphEvent>,
+    events: ReadonlyArray<Pick<GraphEvent, "id" | "operation">>,
     graph: EventGraph,
     firstLocalVersion?: number,
   ): PersistentUtf16Rope {
@@ -603,7 +610,10 @@ export class EgWalkerEngine {
     // A single-event apply leaves no insert tail to continue.
     this.objectInsertTail = null;
     this.objectInsertNextPrepareIndex = -1;
-    const editor = new TransientUtf16RopeEditor(this.resultingText);
+    const editor =
+      events.length >= MIN_TRANSIENT_BATCH_EVENTS
+        ? new TransientUtf16RopeEditor(this.resultingText)
+        : null;
     this.textEditor = editor;
     try {
       for (let index = 0; index < events.length; index++) {
@@ -619,13 +629,15 @@ export class EgWalkerEngine {
     } finally {
       this.textEditor = null;
     }
-    this.resultingText = editor.finish();
+    if (editor !== null) {
+      this.resultingText = editor.finish();
+    }
     return this.resultingText;
   }
 
   /** Check that a batch's events start at `firstLocalVersion`, in order. */
   private assertBatchLocalVersions(
-    events: ReadonlyArray<GraphEvent>,
+    events: ReadonlyArray<Pick<GraphEvent, "id">>,
     firstLocalVersion: number,
   ): void {
     const last = events.length - 1;

@@ -187,12 +187,20 @@ export interface PrepareReplicaOptions {
 /** Default {@link PrepareReplicaOptions.sliceMs}. */
 const DEFAULT_PREPARE_SLICE_MS = 8;
 
-// Release large caches at a critical cut once its authors have built on it
-// (see `isAtConfirmedCriticalCut`), unless a release had to be rebuilt (see
-// `retainReplayCacheAcrossCuts`), but keep an active concurrent interval warm
-// until its estimated byte budget is exhausted.
+// Release large caches at a critical cut, once its authors have built on it
+// when live traffic reached it (see `isAtConfirmedCriticalCut`), unless a
+// release had to be rebuilt (see `retainReplayCacheAcrossCuts`), but keep an
+// active concurrent interval warm until its estimated byte budget is
+// exhausted.
 const REPLAY_CACHE_CRITICAL_RELEASE_EVENTS = 4_096;
 const MAX_WARM_BATCH_EVENTS = 4_096;
+/**
+ * Most events in a receive that counts as live traffic. A larger receive is a
+ * catch-up: a release it leads to is undone at most once per batch, so it
+ * does not wait for a confirmed cut, and a causal chain that long edits the
+ * text directly. See {@link EgWalkerReplica.evictReplayCacheIfNeeded}.
+ */
+const MAX_LIVE_RECEIVE_EVENTS = 1_024;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
 /**
  * Ceiling for the adaptive replay-cache budget.
@@ -1121,7 +1129,7 @@ export class EgWalkerReplica {
           if (checkpoint === null) {
             this.fullReplay();
           } else {
-            this.partialReplayFromCheckpoint(checkpoint, true);
+            this.partialReplayFromCheckpoint(checkpoint, true, columns.count);
             this.maybeAdvanceCheckpoint();
           }
         }
@@ -1289,7 +1297,7 @@ export class EgWalkerReplica {
         if (checkpoint === null) {
           this.fullReplay();
         } else {
-          this.partialReplayFromCheckpoint(checkpoint, true);
+          this.partialReplayFromCheckpoint(checkpoint, true, events.length);
           this.maybeAdvanceCheckpoint();
         }
       }
@@ -1311,13 +1319,15 @@ export class EgWalkerReplica {
    * But an event concurrent with the chain may still be in flight, and when
    * the history has no critical version left, as under sustained
    * concurrency, the engine dropped here is rebuilt by replaying the whole
-   * history. So the engine integrates the chain as it would the same events
-   * one at a time, and is released only at a confirmed critical cut (see
-   * {@link isAtConfirmedCriticalCut}). A chain longer than a warm batch still
-   * drops it.
+   * history. So the engine integrates a live chain as it would the same
+   * events one at a time, and is released only at a confirmed critical cut
+   * (see {@link isAtConfirmedCriticalCut}). A chain of more than
+   * {@link MAX_LIVE_RECEIVE_EVENTS} events still drops it: integrating a
+   * long chain into a large engine costs more than the partial replay a
+   * later concurrent event may need.
    */
   private keepsReplayCacheThroughChain(eventCount: number): boolean {
-    return this.engine !== null && eventCount <= MAX_WARM_BATCH_EVENTS;
+    return this.engine !== null && eventCount <= MAX_LIVE_RECEIVE_EVENTS;
   }
 
   /**
@@ -1358,7 +1368,10 @@ export class EgWalkerReplica {
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
     this.clearSupersededReplayCacheRefusal();
     this.growReplayCacheBudgetToKeepRebuild(false);
-    this.evictReplayCacheIfNeeded(this.retainReplayCacheAcrossCuts);
+    this.evictReplayCacheIfNeeded(
+      this.retainReplayCacheAcrossCuts,
+      events.length,
+    );
     this.maybeAdvanceCheckpoint();
     return true;
   }
@@ -3155,17 +3168,29 @@ export class EgWalkerReplica {
 
   /**
    * Release the replay cache when it is over its budget, or when it is large
-   * and the frontier is a confirmed critical cut, unless `retainAcrossCuts`;
-   * see {@link isAtConfirmedCriticalCut} and
+   * and the frontier is a critical cut, unless `retainAcrossCuts`; see
    * {@link retainReplayCacheAcrossCuts}.
+   *
+   * After a receive of at most {@link MAX_LIVE_RECEIVE_EVENTS} events, the
+   * cut must be confirmed (see {@link isAtConfirmedCriticalCut}): live
+   * traffic would otherwise release and rebuild the cache once per event
+   * under sustained concurrency. A larger receive is a catch-up and releases
+   * at any singleton frontier: the rebuild a release may cost comes at most
+   * once per batch, while a cache kept waiting for confirmation would grow
+   * with every concurrent batch after it.
    */
-  private evictReplayCacheIfNeeded(retainAcrossCuts = false): void {
+  private evictReplayCacheIfNeeded(
+    retainAcrossCuts = false,
+    receivedEvents = 1,
+  ): void {
     const overBudget = this.replayCacheBytes > this.replayCacheBudgetBytes;
     if (
       !overBudget &&
       (this.replayCacheEvents <= REPLAY_CACHE_CRITICAL_RELEASE_EVENTS ||
         retainAcrossCuts ||
-        !this.isAtConfirmedCriticalCut())
+        (receivedEvents > MAX_LIVE_RECEIVE_EVENTS
+          ? this.currentVersion.size > 1
+          : !this.isAtConfirmedCriticalCut()))
     ) {
       return;
     }
@@ -3238,11 +3263,13 @@ export class EgWalkerReplica {
    * divergence rather than at the checkpoint, which the checkpoint ladder may
    * have placed up to twice as far back. A replay for a batch receive may
    * keep its engine across critical cuts; see
-   * {@link retainReplayCacheAcrossCuts}.
+   * {@link retainReplayCacheAcrossCuts}. `receivedEvents` is the size of the
+   * receive that needed the replay; see {@link evictReplayCacheIfNeeded}.
    */
   private partialReplayFromCheckpoint(
     checkpoint: CriticalCheckpoint,
     receivesBatch = false,
+    receivedEvents = 1,
   ): void {
     const graph = this.ensureEventGraph();
     // A refusal still pending means this replay rebuilds a cache that was
@@ -3297,7 +3324,10 @@ export class EgWalkerReplica {
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
     this.refreshReplayCacheMetrics();
     this.growReplayCacheBudgetToKeepRebuild(rebuildsRefusedCache);
-    this.evictReplayCacheIfNeeded(this.retainReplayCacheAcrossCuts);
+    this.evictReplayCacheIfNeeded(
+      this.retainReplayCacheAcrossCuts,
+      receivedEvents,
+    );
   }
 
   /**

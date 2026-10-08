@@ -92,11 +92,11 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
         partial.lifetimeFugueComparisons + full.fugueComparisons,
       );
 
-      // A chain too long for a warm batch drops the engine.
+      // A chain longer than a live receive drops the engine.
       const frontier = replica.getFrontier();
       replica.applyRemoteEvents(
         Array.from(
-          { length: 4_097 },
+          { length: 1_025 },
           (_unused, index): GraphEvent => ({
             id: `merge:${index}`,
             parentVersion:

@@ -97,6 +97,68 @@ describe("EgWalkerReplica.applyCausalBatch", () => {
   });
 });
 
+describe("EgWalkerReplica.applyCausalBatch, live and catch-up receives", () => {
+  it.each([
+    { kind: "live", mainEdits: 1_023, outcome: "keep", evictions: 0 },
+    { kind: "catch-up", mainEdits: 1_024, outcome: "release", evictions: 1 },
+  ])("should $outcome a large cache at the cut a $kind merge batch ends at", ({
+    mainEdits,
+    evictions,
+  }) => {
+    // Arrange: the main line's next edits and their merge with the side
+    // branch, one receive of `mainEdits + 1` events that is not one chain.
+    const branch = maintenanceBranch();
+    const replica = new EgWalkerReplica("reader", "", pack(branch.history));
+    replica.applyCausalBatch(batchOf(branch.fork));
+    const afterFork = replica.getReplayStats();
+    const batch = firstMergeAfter(mainEdits);
+
+    // Act
+    replica.applyCausalBatch(batchOf(batch));
+
+    // Assert: the retained engine integrated the batch.
+    expect(replica.getReplayStats()).toMatchObject({
+      fullReplays: afterFork.fullReplays,
+      partialReplays: afterFork.partialReplays,
+      replayCacheEvictions: evictions,
+    });
+    expect(replica.getReplayStats().replayCacheEvents > 0).toBe(
+      evictions === 0,
+    );
+    expect(replica.getText()).toBe(
+      replayedText([...branch.history, ...branch.fork, ...batch]),
+    );
+  });
+
+  it.each([
+    { kind: "live", events: 1_024, outcome: "keep", evictions: 0 },
+    { kind: "catch-up", events: 1_025, outcome: "drop", evictions: 1 },
+  ])("should $outcome the engine for a $kind chain", ({
+    events,
+    evictions,
+  }) => {
+    // Arrange
+    const branch = maintenanceBranch();
+    const replica = new EgWalkerReplica("reader", "", pack(branch.history));
+    replica.applyCausalBatch(batchOf(branch.fork));
+    const afterFork = replica.getReplayStats();
+    const chain = mergeChain(events);
+
+    // Act
+    replica.applyCausalBatch(batchOf(chain));
+
+    // Assert
+    expect(replica.getReplayStats()).toMatchObject({
+      fullReplays: afterFork.fullReplays,
+      partialReplays: afterFork.partialReplays,
+      replayCacheEvictions: evictions,
+    });
+    expect(replica.getText()).toBe(
+      replayedText([...branch.history, ...branch.fork, ...chain]),
+    );
+  });
+});
+
 describe("EgWalkerReplica.applyRemoteEvent", () => {
   it("should release a rebuilt cache at the next confirmed critical cut", () => {
     // Arrange
@@ -155,6 +217,39 @@ const maintenanceBranch = () => ({
   ],
   nextExtension: [insert("side:2", ["side:1"], 52, "s")],
 });
+
+/**
+ * The main line's next `count` edits at its end, then their merge with the
+ * side branch's `side:0`; `firstMergeAfter(1)` is the first merge.
+ */
+const firstMergeAfter = (count: number): GraphEvent[] => [
+  ...Array.from({ length: count }, (_unused, index) =>
+    insert(
+      `main:${6_000 + index}`,
+      [`main:${5_999 + index}`],
+      6_100 + index,
+      "x",
+    ),
+  ),
+  insert("merge:0", [`main:${5_999 + count}`, "side:0"], 6_101 + count, "m"),
+];
+
+/**
+ * A merge of the main line with `side:0`, then the main line's next edits
+ * after it, `count` events in all: one causal chain from the frontier the
+ * fork leaves.
+ */
+const mergeChain = (count: number): GraphEvent[] => [
+  insert("merge:0", ["main:5999", "side:0"], 6_101, "m"),
+  ...Array.from({ length: count - 1 }, (_unused, index) =>
+    insert(
+      `main:${6_000 + index}`,
+      [index === 0 ? "merge:0" : `main:${5_999 + index}`],
+      6_102 + index,
+      "y",
+    ),
+  ),
+];
 
 /** `count` edits the main line types at its end after the first merge. */
 const mainAfterFirstMerge = (count: number): GraphEvent[] =>

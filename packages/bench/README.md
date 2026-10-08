@@ -383,6 +383,44 @@ node scripts/run-wide-frontier-bench.mjs \
 `--apis single` or `--apis batch` runs one API. `--output` receives
 `summary.md` and `runs.jsonl`; each invocation replaces both files.
 
+## Sustained-concurrency typing
+
+`sustained-concurrency-bench` measures live collaboration where every writer
+keeps typing while edits are in flight. `--writers` replicas each type one
+letter per step at their own cursor, `--events` letters in all, and every edit
+reaches the other writers and a relay, which never types, 1 to `--max-delay`
+steps later. After the first steps the history has no critical version, so a
+replica that releases its replay cache can rebuild it only by replaying the
+whole history. Each replica receives the edits that arrive from one writer in
+a step one `applyRemoteEvent` call at a time (`single`) or as one
+`applyRemoteEvents` batch (`batch`). For each writer count, event count and
+API the summary reports:
+
+- the time in every replica call, in receives, and in the relay's receives;
+- the time per typed letter, and that time divided by the time per letter at
+  the smallest `--events`, which stays near 1 while the session is linear in
+  its length;
+- full replays, partial replays and replay-cache releases, summed over the
+  writers and the relay.
+
+Each sample runs in a fresh process: one untimed session of `--warmup-events`
+letters, then the measured one. Outside the timer, every session checks that
+all replicas converge on text with every typed letter, and the driver requires
+every implementation and API to produce the same text for a given writer and
+event count. It alternates the implementation order between runs:
+
+```bash
+pnpm exec turbo run build --filter=@softmaple/eg-walker
+node scripts/run-sustained-concurrency-bench.mjs \
+  --impl base=/path/to/base/packages/eg-walker/dist/index.js \
+  --impl head=../eg-walker/dist/index.js \
+  --writers 2,3 --events 2000,4000,8000 --max-delay 10 --runs 3 \
+  --output /path/to/results
+```
+
+`--apis single` or `--apis batch` runs one API. `--output` receives
+`summary.md` and `runs.jsonl`; each invocation replaces both files.
+
 ## Same-position cold replay
 
 `same-position-bench` measures replaying many concurrent inserts at one

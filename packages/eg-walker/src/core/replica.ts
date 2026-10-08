@@ -2770,6 +2770,16 @@ export class EgWalkerReplica {
         replay.pendingLength = combinedLength;
         continue;
       }
+      if (
+        replay.pendingKind === "delete" &&
+        operationIndex + operationLength === replay.pendingIndex
+      ) {
+        // A backspace run, joined as PackedLinearReplay joins one.
+        this.assertNotMidSurrogate(operationIndex, editor);
+        replay.pendingIndex = operationIndex;
+        replay.pendingLength += operationLength;
+        continue;
+      }
 
       flushCoalescedLinearReplay(replay);
       this.validateLocalOperation(
@@ -3577,6 +3587,16 @@ export class EgWalkerReplica {
         const combinedLength = pendingLength + operation.length;
         this.assertNotMidSurrogate(operation.index + combinedLength, rope);
         pendingLength = combinedLength;
+        continue;
+      }
+      if (
+        pendingKind === "delete" &&
+        operation.index + operation.length === pendingIndex
+      ) {
+        // A backspace run, joined as PackedLinearReplay joins one.
+        this.assertNotMidSurrogate(operation.index, rope);
+        pendingIndex = operation.index;
+        pendingLength += operation.length;
         continue;
       }
       flush();

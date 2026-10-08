@@ -17,9 +17,9 @@ import { surrogateBiasedTextArb } from "./arbitraries";
 import { fcParams } from "./run-config";
 
 /**
- * One edit before it is resolved against the text it applies to. `type` and
- * `forwardDelete` edit at the end of the previous edit, so runs of them are
- * what the replay coalesces.
+ * One edit before it is resolved against the text it applies to. `type`,
+ * `forwardDelete` and `backspace` edit at the end of the previous edit, so
+ * runs of them are what the replay coalesces.
  */
 type EditInstruction =
   | {
@@ -33,7 +33,8 @@ type EditInstruction =
       readonly positionSeed: number;
       readonly lengthSeed: number;
     }
-  | { readonly kind: "forwardDelete"; readonly lengthSeed: number };
+  | { readonly kind: "forwardDelete"; readonly lengthSeed: number }
+  | { readonly kind: "backspace"; readonly lengthSeed: number };
 
 /** An edit the replay must reject, resolved against the script's final text. */
 type InvalidEdit =
@@ -46,7 +47,7 @@ type InvalidEdit =
   | {
       readonly kind: "splitPair";
       readonly positionSeed: number;
-      readonly edit: "insert" | "deleteFrom" | "deleteInto";
+      readonly edit: "insert" | "deleteFrom" | "deleteInto" | "backspaceInto";
     };
 
 const insertTextArb = fc.oneof(fc.constant(""), surrogateBiasedTextArb());
@@ -67,6 +68,10 @@ const editInstructionArb: fc.Arbitrary<EditInstruction> = fc.oneof(
     kind: fc.constant("forwardDelete" as const),
     lengthSeed: fc.nat(),
   }),
+  fc.record({
+    kind: fc.constant("backspace" as const),
+    lengthSeed: fc.nat(),
+  }),
 );
 
 const invalidEditArb: fc.Arbitrary<InvalidEdit> = fc.oneof(
@@ -82,7 +87,12 @@ const invalidEditArb: fc.Arbitrary<InvalidEdit> = fc.oneof(
   fc.record({
     kind: fc.constant("splitPair" as const),
     positionSeed: fc.nat(),
-    edit: fc.constantFrom("insert", "deleteFrom", "deleteInto"),
+    edit: fc.constantFrom(
+      "insert",
+      "deleteFrom",
+      "deleteInto",
+      "backspaceInto",
+    ),
   }),
 );
 
@@ -185,6 +195,18 @@ const resolveScript = (
   let cursor = scalars.length;
 
   for (const instruction of instructions) {
+    if (instruction.kind === "backspace") {
+      const at = cursor - (instruction.lengthSeed % (cursor + 1));
+      const removed = scalars.splice(at, cursor - at);
+      operations.push({
+        type: OPERATION_TYPE.DELETE,
+        index: scalars.slice(0, at).join("").length,
+        length: removed.join("").length,
+      });
+      cursor = at;
+      texts.push(scalars.join(""));
+      continue;
+    }
     const at =
       instruction.kind === "type" || instruction.kind === "forwardDelete"
         ? cursor
@@ -254,6 +276,18 @@ const resolveInvalidEdit = (
     };
   }
 
+  if (invalid.edit === "backspaceInto") {
+    // Delete the character after a pair, then backspace into the pair's
+    // second half: the backspace joins the pending delete.
+    return {
+      edits: [
+        { type: OPERATION_TYPE.INSERT, index, text: "🙂x" },
+        { type: OPERATION_TYPE.DELETE, index: index + 2, length: 1 },
+        { type: OPERATION_TYPE.DELETE, index: index + 1, length: 1 },
+      ],
+      error: /between surrogate halves/,
+    };
+  }
   const pair: ExternalOperation = {
     type: OPERATION_TYPE.INSERT,
     index,

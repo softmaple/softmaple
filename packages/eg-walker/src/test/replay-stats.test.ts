@@ -92,20 +92,20 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
         partial.lifetimeFugueComparisons + full.fugueComparisons,
       );
 
-      replica.applyRemoteEvents([
-        {
-          id: "merge:0",
-          parentVersion: replica.getFrontier(),
-          operation: { type: "insert", index: 0, text: "!" },
-          timestamp: 12,
-        },
-        {
-          id: "merge:1",
-          parentVersion: new Set(["merge:0"]),
-          operation: { type: "insert", index: 0, text: "!" },
-          timestamp: 13,
-        },
-      ]);
+      // A chain too long for a warm batch drops the engine.
+      const frontier = replica.getFrontier();
+      replica.applyRemoteEvents(
+        Array.from(
+          { length: 4_097 },
+          (_unused, index): GraphEvent => ({
+            id: `merge:${index}`,
+            parentVersion:
+              index === 0 ? frontier : new Set([`merge:${index - 1}`]),
+            operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "!" },
+            timestamp: 12 + index,
+          }),
+        ),
+      );
       const released = replica.getReplayStats();
       expect(released).toMatchObject({
         replayedEvents: 10,
@@ -215,7 +215,14 @@ describe("EgWalkerReplica replay stats — new diagnostic fields", () => {
       }
 
       expect(api.getReplayStats().replayCacheEvents).toBeGreaterThan(4_096);
-      api.insert(api.getText().length, "!"); // A critical cut releases the large cache.
+      // A critical cut releases the large cache once its author built on it.
+      const merge = api.insert(api.getText().length, "!")!;
+      api.applyRemoteEvent({
+        id: "concurrent:4097",
+        parentVersion: new Set([merge.id]),
+        operation: { type: OPERATION_TYPE.INSERT, index: 0, text: "x" },
+        timestamp: 4_097,
+      });
       const after = api.getReplayStats();
       expect(after.replayCacheEvents).toBe(0);
       expect(after.sequenceRecordCount).toBe(0);

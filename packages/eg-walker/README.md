@@ -14,10 +14,10 @@ Eg-walker implementation for collaborative plain-text editing, based on
 - `lifetimeRetreats`, `lifetimeAdvances`, and the other `lifetime*` work counters
   include engines used by live replays and snapshot validation, even temporary
   engines discarded within a replay
-  and engines released at a critical cut or byte budget. Successful snapshot
+  and engines released at a confirmed critical cut or byte budget. Successful snapshot
   validation contributes its engine work once when the replica adopts it.
 - `replayCacheEvictions` counts retained engines released by cache policy or a
-  direct linear batch; replacing an engine during replay is not an eviction. `replayCacheBudgetRefusals` counts byte-budget
+  linear batch of more than 1,024 events; replacing an engine during replay is not an eviction. `replayCacheBudgetRefusals` counts byte-budget
   refusals, including a newly built engine that was never retained. A budget
   eviction increments both; a critical-cut release increments only evictions.
   `replayCacheBudgetBytes` is the current adaptive budget.
@@ -68,6 +68,19 @@ derived: they can be discarded at a critical version and rebuilt, which is what
 makes partial replay possible. A native snapshot may additionally persist that
 derived cache for faster restore, but it never replaces the graph as the source
 of truth. `graph/` never imports `engine/`.
+
+A replica keeps the engine of its last replay for later concurrent events and
+releases it at a critical version once it holds more than 4,096 events. A
+frontier of one event is critical only among the events the replica holds,
+though: under sustained concurrency a peer that has not seen it yet sends a
+concurrent edit, and after a release only a replay of the whole history can
+rebuild the engine. So after live traffic (a receive of at most 1,024 events,
+or a local edit) the engine is released only at a confirmed cut, once every
+author of its events has sent an event that follows the cut, or the 1,024
+events after it all follow it. A larger receive is a catch-up: it still
+releases the engine at any critical version it ends at, and a causal chain
+of more than 1,024 events edits the text directly instead of going through
+the engine.
 
 ### Event graph storage
 

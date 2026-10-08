@@ -45,6 +45,15 @@ import {
   type CriticalCheckpointStoreSnapshot,
 } from "./internals/critical-checkpoint-store";
 import {
+  advanceCriticalCut,
+  emptyIntervalAuthors,
+  isCriticalCutConfirmed,
+  openCriticalCut,
+  scanIntervalAuthors,
+  type IntervalAuthors,
+  type PendingCriticalCut,
+} from "./internals/critical-cut-confirmation";
+import {
   assertRemoteEventWellFormed,
   assertDocumentIndex,
   assertCodePointBoundary,
@@ -178,11 +187,20 @@ export interface PrepareReplicaOptions {
 /** Default {@link PrepareReplicaOptions.sliceMs}. */
 const DEFAULT_PREPARE_SLICE_MS = 8;
 
-// Release large caches at a critical cut, unless a release had to be rebuilt
-// (see `retainReplayCacheAcrossCuts`), but keep an active concurrent interval
-// warm until its estimated byte budget is exhausted.
+// Release large caches at a critical cut, once its authors have built on it
+// when live traffic reached it (see `isAtConfirmedCriticalCut`), unless a
+// release had to be rebuilt (see `retainReplayCacheAcrossCuts`), but keep an
+// active concurrent interval warm until its estimated byte budget is
+// exhausted.
 const REPLAY_CACHE_CRITICAL_RELEASE_EVENTS = 4_096;
 const MAX_WARM_BATCH_EVENTS = 4_096;
+/**
+ * Most events in a receive that counts as live traffic. A larger receive is a
+ * catch-up: a release it leads to is undone at most once per batch, so it
+ * does not wait for a confirmed cut, and a causal chain that long edits the
+ * text directly. See {@link EgWalkerReplica.evictReplayCacheIfNeeded}.
+ */
+const MAX_LIVE_RECEIVE_EVENTS = 1_024;
 const MAX_REPLAY_CACHE_BYTES = 32 * 1024 * 1024;
 /**
  * Ceiling for the adaptive replay-cache budget.
@@ -337,6 +355,8 @@ interface RemoteBatchSnapshot {
   readonly releasedCacheAtBudget: boolean;
   readonly replayCacheCriticalReleaseCut: number;
   readonly retainReplayCacheAcrossCuts: boolean;
+  readonly replayCacheAuthors: IntervalAuthors;
+  readonly pendingCriticalCut: PendingCriticalCut | null;
   readonly engineRecoveryAnchor: EngineRecoveryAnchor | null;
 }
 
@@ -444,11 +464,18 @@ export class EgWalkerReplica {
    * partial replay for a batch rebuilt more than
    * REPLAY_CACHE_CRITICAL_RELEASE_EVENTS events from before the last release,
    * the cache it builds is kept until it is released for its size or dropped
-   * by a linear batch. Single events still release it at a critical cut: a
-   * kept engine would integrate every event after the cut, where a release
-   * lets the linear ones edit the text directly.
+   * by a linear batch. Single events still release it at a confirmed critical
+   * cut: a kept engine would integrate every event after the cut, where a
+   * release lets the linear ones edit the text directly.
    */
   private retainReplayCacheAcrossCuts = false;
+  /** Authors of the replay cache's interval, counted up to a cursor. */
+  private replayCacheAuthors: IntervalAuthors = emptyIntervalAuthors(0);
+  /**
+   * The singleton frontier the replay cache waits to be released at; see
+   * {@link isAtConfirmedCriticalCut}.
+   */
+  private pendingCriticalCut: PendingCriticalCut | null = null;
   private engineRecoveryAnchor: EngineRecoveryAnchor | null = null;
   private remoteEvents: RemoteEventBuffer | null = null;
   private fullReplayCount = 0;
@@ -1102,7 +1129,7 @@ export class EgWalkerReplica {
           if (checkpoint === null) {
             this.fullReplay();
           } else {
-            this.partialReplayFromCheckpoint(checkpoint, true);
+            this.partialReplayFromCheckpoint(checkpoint, true, columns.count);
             this.maybeAdvanceCheckpoint();
           }
         }
@@ -1224,9 +1251,11 @@ export class EgWalkerReplica {
 
   /**
    * Integrate a causally-closed batch without invoking the single-event
-   * pending/drain path. Linear batches edit the persistent rope directly;
-   * divergent batches append once and replay once, so a batch of N events
-   * cannot accidentally trigger N successively larger replays.
+   * pending/drain path. Linear batches edit the persistent rope directly,
+   * unless a retained replay engine integrates them (see
+   * {@link keepsReplayCacheThroughChain}); divergent batches append once and
+   * replay once, so a batch of N events cannot accidentally trigger N
+   * successively larger replays.
    */
   private applyClosedRemoteBatch(
     prepared: PreparedRemoteBatch,
@@ -1238,21 +1267,28 @@ export class EgWalkerReplica {
     const transaction = graph.beginAppendTransaction();
 
     try {
-      if (
-        orderedLinear ??
-        isLinearBatchFromVersion(events, this.currentVersion)
-      ) {
+      const linear =
+        orderedLinear ?? isLinearBatchFromVersion(events, this.currentVersion);
+      if (linear && !this.keepsReplayCacheThroughChain(events.length)) {
         const operations = this.applyClosedLinearBatch(prepared, graph);
         transaction.commit();
         return { results: prepared.results, operations };
       }
 
+      // A causal extension changes the document by its own operations.
+      const operations: PositionOperation[] | null = linear ? [] : null;
       for (const candidate of prepared.candidates) {
         graph.addEvent(candidate.event);
+        const operation = linear
+          ? toPositionOperation(candidate.event.operation)
+          : null;
         prepared.results[candidate.inputIndex] = {
           status: APPLY_REMOTE_EVENT_STATUS.Integrated,
-          operation: null,
+          operation,
         };
+        if (operation !== null) {
+          operations?.push(operation);
+        }
       }
 
       if (!this.tryApplyWarmBatch(events, graph)) {
@@ -1261,18 +1297,37 @@ export class EgWalkerReplica {
         if (checkpoint === null) {
           this.fullReplay();
         } else {
-          this.partialReplayFromCheckpoint(checkpoint, true);
+          this.partialReplayFromCheckpoint(checkpoint, true, events.length);
           this.maybeAdvanceCheckpoint();
         }
       }
 
       transaction.commit();
-      return { results: prepared.results, operations: null };
+      return { results: prepared.results, operations };
     } catch (error) {
       transaction.rollback();
       this.restoreRemoteBatchSnapshot(snapshot, graph);
       throw error;
     }
+  }
+
+  /**
+   * Whether a retained replay engine integrates a causal chain of
+   * `eventCount` events rather than being dropped for it.
+   *
+   * The chain alone does not need the engine: it edits the text directly.
+   * But an event concurrent with the chain may still be in flight, and when
+   * the history has no critical version left, as under sustained
+   * concurrency, the engine dropped here is rebuilt by replaying the whole
+   * history. So the engine integrates a live chain as it would the same
+   * events one at a time, and is released only at a confirmed critical cut
+   * (see {@link isAtConfirmedCriticalCut}). A chain of more than
+   * {@link MAX_LIVE_RECEIVE_EVENTS} events still drops it: integrating a
+   * long chain into a large engine costs more than the partial replay a
+   * later concurrent event may need.
+   */
+  private keepsReplayCacheThroughChain(eventCount: number): boolean {
+    return this.engine !== null && eventCount <= MAX_LIVE_RECEIVE_EVENTS;
   }
 
   /**
@@ -1284,7 +1339,7 @@ export class EgWalkerReplica {
    * cache and keeps the applied document instead of replaying it a second time.
    */
   private tryApplyWarmBatch(
-    events: ReadonlyArray<GraphEvent>,
+    events: ReadonlyArray<Pick<GraphEvent, "id" | "operation">>,
     graph: EventGraph,
   ): boolean {
     if (this.engine === null || events.length > MAX_WARM_BATCH_EVENTS)
@@ -1313,7 +1368,10 @@ export class EgWalkerReplica {
     this.lastReplaySource = REPLAY_SOURCE.INCREMENTAL;
     this.clearSupersededReplayCacheRefusal();
     this.growReplayCacheBudgetToKeepRebuild(false);
-    this.evictReplayCacheIfNeeded(this.retainReplayCacheAcrossCuts);
+    this.evictReplayCacheIfNeeded(
+      this.retainReplayCacheAcrossCuts,
+      events.length,
+    );
     this.maybeAdvanceCheckpoint();
     return true;
   }
@@ -1422,15 +1480,26 @@ export class EgWalkerReplica {
   }
 
   /**
-   * Apply an exact chain the graph already holds, dropping any retained replay
-   * engine: a causal extension is expressed in the plain document's indexes.
-   * Edits before the retained-checkpoint window are coalesced into rope
-   * splices; each event in the window is applied and checkpointed on its own.
+   * Apply an exact chain the graph already holds. A causal extension is
+   * expressed in the plain document's indexes, so unless a retained replay
+   * engine integrates the chain (see {@link keepsReplayCacheThroughChain}),
+   * the engine is dropped and the chain edits the text directly. Edits before
+   * the retained-checkpoint window are coalesced into rope splices; each
+   * event in the window is applied and checkpointed on its own.
    */
   private applyLinearBatch(
     batch: LinearChainEvents,
     eventCountBeforeBatch: number,
   ): void {
+    if (this.keepsReplayCacheThroughChain(batch.count)) {
+      const events = Array.from({ length: batch.count }, (_unused, offset) => ({
+        id: requirePackedEventId(batch, offset),
+        operation: batch.operationAt(offset),
+      }));
+      if (this.tryApplyWarmBatch(events, this.ensureEventGraph())) {
+        return;
+      }
+    }
     const previousStats = this.engineStatsOverride ?? this.engine?.getStats();
     if (this.engine !== null) this.replayCacheEvictions++;
     this.captureEngineStatsBeforeSwap();
@@ -1825,6 +1894,8 @@ export class EgWalkerReplica {
     this.replayCacheCriticalReleaseCut =
       validator.replayCacheCriticalReleaseCut;
     this.retainReplayCacheAcrossCuts = validator.retainReplayCacheAcrossCuts;
+    this.replayCacheAuthors = validator.replayCacheAuthors;
+    this.pendingCriticalCut = validator.pendingCriticalCut;
     this.restoredSequenceRecords = null;
     this.restoredDeleteTargets = null;
     const counters = this.criticalCheckpoints.snapshotForTransaction();
@@ -1906,6 +1977,8 @@ export class EgWalkerReplica {
       releasedCacheAtBudget: this.releasedCacheAtBudget,
       replayCacheCriticalReleaseCut: this.replayCacheCriticalReleaseCut,
       retainReplayCacheAcrossCuts: this.retainReplayCacheAcrossCuts,
+      replayCacheAuthors: this.replayCacheAuthors,
+      pendingCriticalCut: this.pendingCriticalCut,
       engineRecoveryAnchor: this.engineRecoveryAnchor,
     };
   }
@@ -1948,6 +2021,8 @@ export class EgWalkerReplica {
     this.releasedCacheAtBudget = snapshot.releasedCacheAtBudget;
     this.replayCacheCriticalReleaseCut = snapshot.replayCacheCriticalReleaseCut;
     this.retainReplayCacheAcrossCuts = snapshot.retainReplayCacheAcrossCuts;
+    this.replayCacheAuthors = snapshot.replayCacheAuthors;
+    this.pendingCriticalCut = snapshot.pendingCriticalCut;
     this.engineRecoveryAnchor = snapshot.engineRecoveryAnchor;
 
     if (snapshot.engineStats === null) {
@@ -2708,6 +2783,16 @@ export class EgWalkerReplica {
         replay.pendingLength = combinedLength;
         continue;
       }
+      if (
+        replay.pendingKind === "delete" &&
+        operationIndex + operationLength === replay.pendingIndex
+      ) {
+        // A backspace run, joined as PackedLinearReplay joins one.
+        this.assertNotMidSurrogate(operationIndex, editor);
+        replay.pendingIndex = operationIndex;
+        replay.pendingLength += operationLength;
+        continue;
+      }
 
       flushCoalescedLinearReplay(replay);
       this.validateLocalOperation(
@@ -2936,6 +3021,8 @@ export class EgWalkerReplica {
     baseEventCount = 0,
   ): void {
     this.retainReplayCacheAcrossCuts = false;
+    this.replayCacheAuthors = emptyIntervalAuthors(baseEventCount);
+    this.pendingCriticalCut = null;
     this.replayCacheBaseVersion =
       baseVersion === null ? null : new Set(baseVersion);
     this.replayCacheBaseEventCount = baseEventCount;
@@ -3083,14 +3170,27 @@ export class EgWalkerReplica {
    * Release the replay cache when it is over its budget, or when it is large
    * and the frontier is a critical cut, unless `retainAcrossCuts`; see
    * {@link retainReplayCacheAcrossCuts}.
+   *
+   * After a receive of at most {@link MAX_LIVE_RECEIVE_EVENTS} events, the
+   * cut must be confirmed (see {@link isAtConfirmedCriticalCut}): live
+   * traffic would otherwise release and rebuild the cache once per event
+   * under sustained concurrency. A larger receive is a catch-up and releases
+   * at any singleton frontier: the rebuild a release may cost comes at most
+   * once per batch, while a cache kept waiting for confirmation would grow
+   * with every concurrent batch after it.
    */
-  private evictReplayCacheIfNeeded(retainAcrossCuts = false): void {
+  private evictReplayCacheIfNeeded(
+    retainAcrossCuts = false,
+    receivedEvents = 1,
+  ): void {
     const overBudget = this.replayCacheBytes > this.replayCacheBudgetBytes;
     if (
       !overBudget &&
       (this.replayCacheEvents <= REPLAY_CACHE_CRITICAL_RELEASE_EVENTS ||
-        this.currentVersion.size > 1 ||
-        retainAcrossCuts)
+        retainAcrossCuts ||
+        (receivedEvents > MAX_LIVE_RECEIVE_EVENTS
+          ? this.currentVersion.size > 1
+          : !this.isAtConfirmedCriticalCut()))
     ) {
       return;
     }
@@ -3114,6 +3214,45 @@ export class EgWalkerReplica {
   }
 
   /**
+   * Whether the frontier is a critical cut that releasing the replay cache
+   * at will not be undone by an event still in flight.
+   *
+   * A singleton frontier is only critical among the events this replica
+   * holds. Under sustained concurrency, an author that has not seen it yet
+   * sends an event concurrent with it, no checkpoint after the cut can serve
+   * that event, and the replay that follows rebuilds the whole concurrent
+   * interval, once per such event. So the first singleton frontier becomes a
+   * pending cut, and the cache is released at a singleton frontier only once
+   * that cut is confirmed; an event concurrent with it cancels it. See
+   * {@link PendingCriticalCut}.
+   */
+  private isAtConfirmedCriticalCut(): boolean {
+    const graph = this.ensureEventGraph();
+    const eventCount = graph.getEventCount();
+    let cut =
+      this.pendingCriticalCut === null
+        ? null
+        : advanceCriticalCut(this.pendingCriticalCut, graph, eventCount);
+    if (cut === null && graph.getFrontierSize() === 1) {
+      this.replayCacheAuthors = scanIntervalAuthors(
+        this.replayCacheAuthors,
+        graph,
+        eventCount,
+      );
+      cut = openCriticalCut(eventCount, this.replayCacheAuthors, [
+        graph.agentAt(eventCount - 1),
+        graph.agentTable.numberOf(this.replicaId),
+      ]);
+    }
+    this.pendingCriticalCut = cut;
+    return (
+      cut !== null &&
+      graph.getFrontierSize() === 1 &&
+      isCriticalCutConfirmed(cut)
+    );
+  }
+
+  /**
    * Section 3.6 partial replay of the events after `checkpoint`.
    *
    * Only the last nonlinear critical section after the checkpoint needs CRDT
@@ -3124,11 +3263,13 @@ export class EgWalkerReplica {
    * divergence rather than at the checkpoint, which the checkpoint ladder may
    * have placed up to twice as far back. A replay for a batch receive may
    * keep its engine across critical cuts; see
-   * {@link retainReplayCacheAcrossCuts}.
+   * {@link retainReplayCacheAcrossCuts}. `receivedEvents` is the size of the
+   * receive that needed the replay; see {@link evictReplayCacheIfNeeded}.
    */
   private partialReplayFromCheckpoint(
     checkpoint: CriticalCheckpoint,
     receivesBatch = false,
+    receivedEvents = 1,
   ): void {
     const graph = this.ensureEventGraph();
     // A refusal still pending means this replay rebuilds a cache that was
@@ -3183,7 +3324,10 @@ export class EgWalkerReplica {
     this.lastReplaySource = REPLAY_SOURCE.PARTIAL;
     this.refreshReplayCacheMetrics();
     this.growReplayCacheBudgetToKeepRebuild(rebuildsRefusedCache);
-    this.evictReplayCacheIfNeeded(this.retainReplayCacheAcrossCuts);
+    this.evictReplayCacheIfNeeded(
+      this.retainReplayCacheAcrossCuts,
+      receivedEvents,
+    );
   }
 
   /**
@@ -3473,6 +3617,16 @@ export class EgWalkerReplica {
         const combinedLength = pendingLength + operation.length;
         this.assertNotMidSurrogate(operation.index + combinedLength, rope);
         pendingLength = combinedLength;
+        continue;
+      }
+      if (
+        pendingKind === "delete" &&
+        operation.index + operation.length === pendingIndex
+      ) {
+        // A backspace run, joined as PackedLinearReplay joins one.
+        this.assertNotMidSurrogate(operation.index, rope);
+        pendingIndex = operation.index;
+        pendingLength += operation.length;
         continue;
       }
       flush();

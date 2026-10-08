@@ -154,6 +154,20 @@ export class PackedLinearReplay {
         continue;
       }
 
+      if (
+        this.pendingKind === "delete" &&
+        index + length === this.pendingIndex
+      ) {
+        // A backspace run: the delete ends where the pending one starts, so
+        // the text before it is the same with or without the pending delete,
+        // and only its start needs checking. As for the delete key above, the
+        // two edits' shared boundary is one in well-formed text.
+        assertCodePointBoundary(index, document);
+        this.pendingIndex = index;
+        this.pendingLength += length;
+        continue;
+      }
+
       this.flush();
       assertDocumentIndex(index, false, document);
       assertCodePointBoundary(index, document);

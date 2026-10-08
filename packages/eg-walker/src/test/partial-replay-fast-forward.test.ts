@@ -93,9 +93,10 @@ describe("EgWalkerReplica partial replay from a checkpoint", () => {
     const history = historyWithConcurrentSections();
     const replica = new EgWalkerReplica("reader", "", pack(history));
     const first = insert("peer:0", ["after:194"], 0, "!");
-    // A merge closes the divergence and a typed chain drops its cache.
+    // A merge closes the divergence, and a typed chain longer than a live
+    // receive drops its cache.
     const merge = insert("merge:peer", ["peer:0", "after:494"], 1_016, "M");
-    const chain = typing("tail", 8, ["merge:peer"], 1_017);
+    const chain = typing("tail", 1_025, ["merge:peer"], 1_017);
     replica.applyRemoteEvent(first);
     replica.applyRemoteEvent(merge);
     replica.applyRemoteEvents(chain);

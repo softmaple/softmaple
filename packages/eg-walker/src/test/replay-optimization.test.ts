@@ -82,7 +82,19 @@ describe("bounded concurrent replay reuse", () => {
     );
     const stats = replica.getReplayStats();
     expect(stats.fullReplays + stats.partialReplays).toBeLessThanOrEqual(2);
-    expect(stats.replayCacheBytes).toBe(0); // The final merge is a critical cut.
+    // The final merge is a critical cut. The cache is released there once
+    // both branches have built on it.
+    expect(stats.replayCacheBytes).toBeGreaterThan(0);
+    replica.applyRemoteEvent(insert("a:2100", ["merge:0"], 0, "a"));
+    replica.applyRemoteEvent(insert("b:2100", ["a:2100"], 4_203, "b"));
+    expect(replica.getText()).toBe(
+      `a!${"a".repeat(2_100)}*${"b".repeat(2_101)}`,
+    );
+    expect(replica.getReplayStats()).toMatchObject({
+      fullReplays: stats.fullReplays,
+      partialReplays: stats.partialReplays,
+      replayCacheBytes: 0,
+    });
   });
 
   it.each([

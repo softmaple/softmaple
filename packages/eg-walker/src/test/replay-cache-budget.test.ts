@@ -170,9 +170,11 @@ describe("adaptive replay-cache budget", () => {
     expect(second.replayCacheEvents).toBe(localEvents + 2);
     expect(replayCacheBudget(replica)).toBe(2 * BASE_BUDGET);
 
-    // A local edit merges both heads: the large cache is released at that
-    // critical cut, whatever the budget.
-    replica.insert(0, "!");
+    // A local edit merges both heads. The large cache is released at that
+    // critical cut, whatever the budget, once the peer has built on it.
+    const merge = replica.insert(0, "!")!;
+    expect(replica.getReplayStats().replayCacheEvents).toBe(localEvents + 3);
+    replica.applyRemoteEvent(insert("peer:2", [merge.id], 0, "z"));
     expect(replica.getReplayStats()).toMatchObject({
       partialReplays: second.partialReplays,
       replayCacheEvents: 0,
